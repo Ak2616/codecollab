@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CodeCollab - Home</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f4f4f4;
+    }
+
+    /* Navbar */
+    .navbar {
+      background-color: #1f1f2e;
+      color: #fff;
+      padding: 15px 25px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 999;
+    }
+
+    .navbar h1 {
+      font-size: 1.5rem;
+    }
+
+    .navbar button {
+      padding: 8px 14px;
+      background-color: #28a745;
+      border: none;
+      border-radius: 4px;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    /* Layout */
+    .container {
+      display: flex;
+      margin-top: 20px;
+    }
+
+    .sidebar, .rightbar {
+      width: 20%;
+      padding: 30px 20px;
+      background-color: #ffffff;
+      min-height: calc(100vh - 60px);
+    }
+
+    .main {
+      flex-grow: 1;
+      padding: 30px 20px;
+    }
+
+    /* Calendar */
+    .calendar {
+      font-size: 0.95rem;
+    }
+
+    .calendar h3 {
+      margin-bottom: 15px;
+      color: #333;
+      font-weight: 600;
+    }
+
+    .calendar ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .calendar li {
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      background-color: #eef3ff;
+      border-left: 4px solid #3f51b5;
+      border-radius: 6px;
+      color: #2a2a2a;
+      font-weight: 500;
+    }
+
+    /* Main content */
+    .project {
+      background-color: #fff;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    }
+
+    .project h3 {
+      font-size: 1.1rem;
+      margin-bottom: 8px;
+    }
+
+    .project p {
+      margin: 4px 0;
+      color: #444;
+    }
+
+    .deadline {
+      font-size: 0.9rem;
+      color: #777;
+    }
+
+    .join-btn {
+      margin-top: 10px;
+      padding: 8px 14px;
+      background-color: #28a745;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    /* Rightbar */
+    .filters h3 {
+      margin-bottom: 15px;
+    }
+
+    .filters select,
+    .filters input[type="date"] {
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 7px 10px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+
+    .stats {
+      margin-top: 30px;
+      background-color: #eafaf1;
+      padding: 10px 14px;
+      border-left: 4px solid #28a745;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      color: #2d6a4f;
+    }
+
+    .stats h4 {
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+
+    .stats p {
+      margin: 5px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navbar -->
+  <div class="navbar">
+    <h1>CodeCollab</h1>
+    <button>+ Post Project</button>
+  </div>
+
+  <!-- Layout -->
+  <div class="container">
+
+    <!-- Left Sidebar -->
+    <div class="sidebar">
+      <div class="calendar">
+        <h3>📅 Upcoming Events</h3>
+        <ul>
+          <li><strong>Aug 15</strong>: Hackathon X</li>
+          <li><strong>Aug 20</strong>: AI Challenge</li>
+          <li><strong>Sep 5</strong>: DevFest</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main">
+      <h2 style="padding-bottom: 20px;">🚀 Ongoing Projects</h2>
+
+      <div class="project">
+        <h3>AI Chatbot for Student Queries</h3>
+        <p>Stack: Python, NLP, Flask</p>
+        <p class="deadline">Deadline: Sep 10, 2025</p>
+        <button class="join-btn">Request to Join</button>
+      </div>
+
+      <div class="project">
+        <h3>Campus Navigator App</h3>
+        <p>Stack: React Native, Google Maps API</p>
+        <p class="deadline">Deadline: Aug 25, 2025</p>
+        <button class="join-btn">Request to Join</button>
+      </div>
+
+      <div class="project">
+        <h3>Collaborative Coding Platform</h3>
+        <p>Stack: Node.js, WebSockets, PostgreSQL</p>
+        <p class="deadline">Deadline: Sep 30, 2025</p>
+        <button class="join-btn">Request to Join</button>
+      </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <div class="rightbar">
+      <div class="filters">
+        <h3>🔍 Filter Projects</h3>
+        <select>
+          <option>All Roles</option>
+          <option>Frontend</option>
+          <option>Backend</option>
+          <option>Designer</option>
+        </select>
+        <select>
+          <option>All Stacks</option>
+          <option>Python</option>
+          <option>JavaScript</option>
+          <option>Go</option>
+          <option>Rust</option>
+        </select>
+        <input type="date" />
+      </div>
+
+      <div class="stats">
+        <h4>📊 Your Stats</h4>
+        <p>Projects Joined: 2</p>
+        <p>Requests Sent: 4</p>
+        <p>Pending Requests: 1</p>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
