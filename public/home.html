@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CodeCollab - Home</title>
   <style>
     * {
@@ -15,34 +16,70 @@
       background-color: #f4f4f4;
     }
 
-    /* Navbar */
-    .navbar {
-      background-color: #1f1f2e;
-      color: #fff;
-      padding: 15px 25px;
+    header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      position: sticky;
-      top: 0;
-      z-index: 999;
+      padding: 20px;
+      background-color: #ffffff;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
 
-    .navbar h1 {
+    .logo {
       font-size: 1.5rem;
+      font-weight: bold;
+      color: #333;
     }
 
-    .navbar button {
-      padding: 8px 14px;
-      background-color: #28a745;
-      border: none;
-      border-radius: 4px;
-      color: white;
-      font-weight: bold;
+    .menu-container {
+      position: relative;
+    }
+
+    .hamburger {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      width: 24px;
+      height: 18px;
       cursor: pointer;
     }
 
-    /* Layout */
+    .hamburger span {
+      width: 100%;
+      height: 3px;
+      background-color: #333;
+      border-radius: 2px;
+      display: block;
+    }
+
+    .dropdown {
+      position: absolute;
+      top: 30px;
+      right: 0;
+      background-color: #fff;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      display: none;
+      flex-direction: column;
+      min-width: 150px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .dropdown a {
+      padding: 10px;
+      color: #333;
+      text-decoration: none;
+      border-bottom: 1px solid #eee;
+    }
+
+    .dropdown a:last-child {
+      border-bottom: none;
+    }
+
+    .menu-container:hover .dropdown {
+      display: flex;
+    }
+
     .container {
       display: flex;
       margin-top: 20px;
@@ -60,7 +97,6 @@
       padding: 30px 20px;
     }
 
-    /* Calendar */
     .calendar {
       font-size: 0.95rem;
     }
@@ -86,7 +122,6 @@
       font-weight: 500;
     }
 
-    /* Main content */
     .project {
       background-color: #fff;
       padding: 15px;
@@ -105,6 +140,15 @@
       color: #444;
     }
 
+    .project .desc-link {
+      display: block;
+      margin-top: 5px;
+      font-size: 0.9rem;
+      color: #0077cc;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
     .deadline {
       font-size: 0.9rem;
       color: #777;
@@ -120,7 +164,20 @@
       cursor: pointer;
     }
 
-    /* Rightbar */
+    .create-project-btn {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background-color: #28a745;
+      color: white;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    }
+
     .filters h3 {
       margin-bottom: 15px;
     }
@@ -155,20 +212,26 @@
   </style>
 </head>
 <body>
-
-  <!-- Navbar -->
-  <div class="navbar">
-    <h1>CodeCollab</h1>
-    <button>+ Post Project</button>
-  </div>
-
-  <!-- Layout -->
+  <header>
+    <div class="logo">CodeCollab</div>
+    <div class="menu-container">
+      <div class="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="dropdown">
+        <a href="#">Profile</a>
+        <a href="#">Settings</a>
+        <a href="#">Notifications</a>
+        <a href="#">Logout</a>
+      </div>
+    </div>
+  </header>
   <div class="container">
-
-    <!-- Left Sidebar -->
     <div class="sidebar">
       <div class="calendar">
-        <h3>📅 Upcoming Events</h3>
+        <h3>🗕️ Upcoming Events</h3>
         <ul>
           <li><strong>Aug 15</strong>: Hackathon X</li>
           <li><strong>Aug 20</strong>: AI Challenge</li>
@@ -176,34 +239,30 @@
         </ul>
       </div>
     </div>
-
-    <!-- Main Content -->
     <div class="main">
       <h2 style="padding-bottom: 20px;">🚀 Ongoing Projects</h2>
-
       <div class="project">
         <h3>AI Chatbot for Student Queries</h3>
-        <p>Stack: Python, NLP, Flask</p>
+        <span class="desc-link">Project Description</span>
+        <p>Tech Stack Required: Python, NLP, Flask</p>
         <p class="deadline">Deadline: Sep 10, 2025</p>
         <button class="join-btn">Request to Join</button>
       </div>
-
       <div class="project">
         <h3>Campus Navigator App</h3>
-        <p>Stack: React Native, Google Maps API</p>
+        <span class="desc-link">Project Description</span>
+        <p>Tech Stack Required: React Native, Google Maps API</p>
         <p class="deadline">Deadline: Aug 25, 2025</p>
         <button class="join-btn">Request to Join</button>
       </div>
-
       <div class="project">
         <h3>Collaborative Coding Platform</h3>
-        <p>Stack: Node.js, WebSockets, PostgreSQL</p>
+        <span class="desc-link">Project Description</span>
+        <p>Tech Stack Required: Node.js, WebSockets, PostgreSQL</p>
         <p class="deadline">Deadline: Sep 30, 2025</p>
         <button class="join-btn">Request to Join</button>
       </div>
     </div>
-
-    <!-- Right Sidebar -->
     <div class="rightbar">
       <div class="filters">
         <h3>🔍 Filter Projects</h3>
@@ -222,7 +281,6 @@
         </select>
         <input type="date" />
       </div>
-
       <div class="stats">
         <h4>📊 Your Stats</h4>
         <p>Projects Joined: 2</p>
@@ -230,7 +288,7 @@
         <p>Pending Requests: 1</p>
       </div>
     </div>
-
   </div>
+  <button class="create-project-btn">Create Project</button>
 </body>
 </html>
