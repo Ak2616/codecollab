@@ -211,6 +211,43 @@
     }
   </style>
 </head>
+
+<script>
+  async function loadProjects() {
+    try {
+      const res = await fetch('/api/projects');
+      const projects = await res.json();  // <- change here
+      const container = document.getElementById('projects-container');
+      container.innerHTML = ''; // Clear old data
+
+      if (!projects || projects.length === 0) {
+        container.innerHTML = '<p>No projects found.</p>';
+        return;
+      }
+
+      projects.forEach(project => {
+        const div = document.createElement('div');
+        div.className = 'project';
+        div.innerHTML = `
+          <h3>${project.title}</h3>
+          <span class="desc-link">Project Description</span>
+          <p>Tech Stack Required: ${project.tech_stack}</p>
+          <p class="deadline">Deadline: ${new Date(project.deadline).toLocaleDateString()}</p>
+          <button class="join-btn">Request to Join</button>
+        `;
+        container.appendChild(div);
+      });
+    } catch (err) {
+      console.error('Error fetching projects:', err);
+      document.getElementById('projects-container').innerHTML =
+        '<p>Failed to load projects.</p>';
+    }
+  }
+
+  loadProjects();
+</script>
+
+
 <body>
   <header>
     <div class="logo">CodeCollab</div>
@@ -241,26 +278,8 @@
     </div>
     <div class="main">
       <h2 style="padding-bottom: 20px;">🚀 Ongoing Projects</h2>
-      <div class="project">
-        <h3>AI Chatbot for Student Queries</h3>
-        <span class="desc-link">Project Description</span>
-        <p>Tech Stack Required: Python, NLP, Flask</p>
-        <p class="deadline">Deadline: Sep 10, 2025</p>
-        <button class="join-btn">Request to Join</button>
-      </div>
-      <div class="project">
-        <h3>Campus Navigator App</h3>
-        <span class="desc-link">Project Description</span>
-        <p>Tech Stack Required: React Native, Google Maps API</p>
-        <p class="deadline">Deadline: Aug 25, 2025</p>
-        <button class="join-btn">Request to Join</button>
-      </div>
-      <div class="project">
-        <h3>Collaborative Coding Platform</h3>
-        <span class="desc-link">Project Description</span>
-        <p>Tech Stack Required: Node.js, WebSockets, PostgreSQL</p>
-        <p class="deadline">Deadline: Sep 30, 2025</p>
-        <button class="join-btn">Request to Join</button>
+      <div id="projects-container">
+        <!-- Dynamic projects will be injected here -->
       </div>
     </div>
     <div class="rightbar">

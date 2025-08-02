@@ -52,7 +52,6 @@ app.post('/login', async (req, res) => {
 
     if (result.rows.length > 0) {
       console.log("✅ Login success:", result.rows[0]);
-      // Redirect to /home after successful login
       res.redirect('/home');
     } else {
       console.warn("❌ Invalid credentials");
@@ -64,9 +63,20 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Serve home.html correctly
+// Serve home.html
 app.get('/home', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/home.html'));
+});
+
+// API route to fetch all projects
+app.get('/api/projects', async (req, res) => {
+  try {
+    const result = await db.query('SELECT * FROM projects');
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Error fetching projects:", err.message);
+    res.status(500).json({ message: "Error fetching projects" });
+  }
 });
 
 // Start server
