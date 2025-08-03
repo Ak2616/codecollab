@@ -4,6 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>CodeCollab - Welcome</title>
+  <script>
+  const user = localStorage.getItem("loggedInUser");
+  if (user) {
+    window.location.href = "home.html";
+  }
+</script>
+
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>

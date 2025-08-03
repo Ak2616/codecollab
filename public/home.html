@@ -76,10 +76,6 @@
       border-bottom: none;
     }
 
-    .menu-container:hover .dropdown {
-      display: flex;
-    }
-
     .container {
       display: flex;
       margin-top: 20px;
@@ -212,59 +208,33 @@
   </style>
 </head>
 
-<script>
-  async function loadProjects() {
-    try {
-      const res = await fetch('/api/projects');
-      const projects = await res.json();  // <- change here
-      const container = document.getElementById('projects-container');
-      container.innerHTML = ''; // Clear old data
-
-      if (!projects || projects.length === 0) {
-        container.innerHTML = '<p>No projects found.</p>';
-        return;
-      }
-
-      projects.forEach(project => {
-        const div = document.createElement('div');
-        div.className = 'project';
-        div.innerHTML = `
-          <h3>${project.title}</h3>
-          <span class="desc-link">Project Description</span>
-          <p>Tech Stack Required: ${project.tech_stack}</p>
-          <p class="deadline">Deadline: ${new Date(project.deadline).toLocaleDateString()}</p>
-          <button class="join-btn">Request to Join</button>
-        `;
-        container.appendChild(div);
-      });
-    } catch (err) {
-      console.error('Error fetching projects:', err);
-      document.getElementById('projects-container').innerHTML =
-        '<p>Failed to load projects.</p>';
-    }
-  }
-
-  loadProjects();
-</script>
-
-
 <body>
   <header>
+    <script>
+      const user = localStorage.getItem('loggedInUser');
+      if (!user) {
+        window.location.href = 'index.html';
+      } else {
+        console.log("Welcome back, " + user);
+      }
+    </script>
+
     <div class="logo">CodeCollab</div>
     <div class="menu-container">
-      <div class="hamburger">
+      <div class="hamburger" onclick="toggleDropdown()">
         <span></span>
         <span></span>
         <span></span>
       </div>
-      <div class="dropdown">
+      <div class="dropdown" id="dropdownMenu">
         <a href="#">Profile</a>
         <a href="#">Settings</a>
         <a href="#">Notifications</a>
-        <a href="#">Logout</a>
+        <a href="#" onclick="logout()">Logout</a>
       </div>
     </div>
   </header>
+
   <div class="container">
     <div class="sidebar">
       <div class="calendar">
@@ -309,5 +279,58 @@
     </div>
   </div>
   <button class="create-project-btn">Create Project</button>
+
+  <script>
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        const projects = await res.json();
+        const container = document.getElementById('projects-container');
+        container.innerHTML = '';
+
+        if (!projects || projects.length === 0) {
+          container.innerHTML = '<p>No projects found.</p>';
+          return;
+        }
+
+        projects.forEach(project => {
+          const div = document.createElement('div');
+          div.className = 'project';
+          div.innerHTML = `
+            <h3>${project.title}</h3>
+            <span class="desc-link">Project Description</span>
+            <p>Tech Stack Required: ${project.tech_stack}</p>
+            <p class="deadline">Deadline: ${new Date(project.deadline).toLocaleDateString()}</p>
+            <button class="join-btn">Request to Join</button>
+          `;
+          container.appendChild(div);
+        });
+      } catch (err) {
+        console.error('Error fetching projects:', err);
+        document.getElementById('projects-container').innerHTML =
+          '<p>Failed to load projects.</p>';
+      }
+    }
+
+    loadProjects();
+
+    // Dropdown logic fix
+    function toggleDropdown() {
+      const dropdown = document.getElementById('dropdownMenu');
+      dropdown.style.display = (dropdown.style.display === 'flex') ? 'none' : 'flex';
+    }
+
+    window.addEventListener('click', function (e) {
+      if (!e.target.closest('.menu-container')) {
+        const dropdown = document.getElementById('dropdownMenu');
+        dropdown.style.display = 'none';
+      }
+    });
+
+    function logout() {
+      localStorage.removeItem('loggedInUser');
+      window.location.href = 'index.html';
+    }
+  </script>
 </body>
 </html>
