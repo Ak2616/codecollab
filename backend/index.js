@@ -72,7 +72,7 @@ app.post('/login', async (req, res) => {
 
     if (result.rows.length === 0) {
       console.warn("❌ Email not found");
-      return res.status(401).send('<h3>Invalid email or password</h3>');
+      return res.status(401).send('Invalid email or password');
     }
 
     const user = result.rows[0];
@@ -80,19 +80,23 @@ app.post('/login', async (req, res) => {
 
     if (!isMatch) {
       console.warn("❌ Incorrect password");
-      return res.status(401).send('<h3>Invalid email or password</h3>');
+      return res.status(401).send('Invalid email or password');
     }
 
-    // Generate JWT
+    // Generate JWT (optional — useful for APIs)
     const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, { expiresIn: '2h' });
 
     console.log("✅ Login successful:", user.email);
-    res.redirect('/home');
+
+    // Send JSON response with username
+    res.json({ username: user.username });
+
   } catch (err) {
     console.error("❌ Login DB Error:", err.message);
-    res.status(500).send('<h3>Server error</h3>');
+    res.status(500).send('Server error');
   }
 });
+
 
 // Serve home.html
 app.get('/home', (req, res) => {

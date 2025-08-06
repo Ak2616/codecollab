@@ -32,13 +32,15 @@
         body: JSON.stringify({ email, password })
       });
 
-      if (res.redirected) {
-        localStorage.setItem('loggedInUser', email); // or replace with ID if needed
-        window.location.href = res.url;
-      } else {
-        const errorText = await res.text();
-        alert(errorText);
-      }
+    if (res.ok) {
+      const responseData = await res.json();  // ✅ Parse response body
+      localStorage.setItem('loggedInUser', responseData.username);  // ✅ Store username
+      window.location.href = '/home.html'; // or res.url if your server redirects
+    } else {
+      const errorText = await res.text();
+      alert(errorText);
+    }
+
     } catch (err) {
       console.error('Login error:', err);
       alert('Server error. Try again.');

@@ -3,16 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <title>Create Project - CodeCollab</title>
+  <link rel="stylesheet" href="create.css" />
 </head>
 <body>
-  <h2>Create New Project</h2>
-  <form id="projectForm">
-    <input type="text" placeholder="Project Title" name="title" required /><br />
-    <textarea placeholder="Description" name="project_description" required></textarea><br />
-    <input type="text" placeholder="Tech Stack" name="tech_stack" required /><br />
-    <input type="date" name="deadline" required /><br />
-    <button type="submit">Create</button>
-  </form>
+  <div class="container">
+    <h2>Create New Project</h2>
+    <form id="projectForm">
+      <input type="text" placeholder="Project Title" name="title" required />
+      <textarea placeholder="Description" name="project_description" required></textarea>
+      <input type="text" placeholder="Tech Stack (e.g. HTML, CSS, JS)" name="tech_stack" required />
+      <input type="date" name="deadline" required />
+      <button type="submit">Create</button>
+    </form>
+  </div>
 
   <script>
     document.getElementById('projectForm').addEventListener('submit', async function (e) {
@@ -35,7 +38,7 @@
         });
 
         if (res.ok) {
-          window.location.href = 'home.html'; // or wherever the homepage is
+          window.location.href = 'home.html';
         } else {
           alert('Failed to create project');
         }
