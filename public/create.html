@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Create Project - CodeCollab</title>
+</head>
+<body>
+  <h2>Create New Project</h2>
+  <form id="projectForm">
+    <input type="text" placeholder="Project Title" name="title" required /><br />
+    <textarea placeholder="Description" name="project_description" required></textarea><br />
+    <input type="text" placeholder="Tech Stack" name="tech_stack" required /><br />
+    <input type="date" name="deadline" required /><br />
+    <button type="submit">Create</button>
+  </form>
+
+  <script>
+    document.getElementById('projectForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const user = localStorage.getItem('loggedInUser');
+      if (!user) return alert("You're not logged in");
+
+      const formData = new FormData(this);
+      const data = Object.fromEntries(formData.entries());
+      data.created_by = user;
+
+      try {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data),
+        });
+
+        if (res.ok) {
+          window.location.href = 'home.html'; // or wherever the homepage is
+        } else {
+          alert('Failed to create project');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Server error');
+      }
+    });
+  </script>
+</body>
+</html>
