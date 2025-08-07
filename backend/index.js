@@ -148,6 +148,33 @@ app.post('/api/projects', async (req, res) => {
   }
 });
 
+// Route to handle join requests
+app.post('/api/join-request', async (req, res) => {
+  const { userId, projectId } = req.body;
+
+  console.log("📨 Join request received:", { userId, projectId });
+
+  if (!userId || !projectId) {
+    return res.status(400).json({ message: 'Missing userId or projectId' });
+  }
+
+  try {
+    const result = await db.query(
+      `INSERT INTO join_requests (user_id, project_id, request_status, requested_at)
+       VALUES ($1, $2, 'pending', NOW())
+       RETURNING *`,
+      [userId, projectId]
+    );
+
+    console.log("✅ Join request saved:", result.rows[0]);
+    res.status(201).json({ message: 'Join request sent successfully' });
+  } catch (err) {
+    console.error("❌ Error inserting join request:", err.message);
+    res.status(500).json({ message: 'Failed to send join request' });
+  }
+});
+
+
 
 // Start server
 const PORT = 3000;

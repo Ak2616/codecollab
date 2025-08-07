@@ -333,7 +333,7 @@ async function loadProjects() {
       projects.forEach(project => {
         const div = document.createElement('div');
         div.className = 'project';
-        const projectId = project._id || project.id || project.title.replace(/\s+/g, '-');
+        const projectId = project._id || project.id;
 
         div.innerHTML = `
   <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -356,7 +356,7 @@ async function loadProjects() {
   </div>
   <p>Tech Stack Required: ${project.tech_stack}</p>
   <p class="deadline">Deadline: ${new Date(project.deadline).toLocaleDateString()}</p>
-  <button type="button" class="join-btn">Request to Join</button>
+  <button type="button" class="join-btn request-btn" data-project-id="${projectId}">Request to Join</button>
 `;
 
         container.appendChild(div);
@@ -405,6 +405,41 @@ async function loadProjects() {
 
 
     loadProjects();
+    document.addEventListener('click', async (e) => {
+  if (e.target && e.target.classList.contains('join-btn')) {
+    const userId = localStorage.getItem('loggedInUserId');
+    const username = localStorage.getItem('loggedInUser');
+    const projectId = e.target.dataset.projectId;
+
+    console.log("🧪 userId:", userId);
+    console.log("🧪 username:", username);
+    console.log("🧪 projectId:", projectId);
+
+    if (!userId || !projectId || !username) {
+      console.error("❌ Missing data. Aborting request.");
+      alert("Request failed — missing user or project data.");
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/join-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, username, projectId })
+      });
+
+      if (!res.ok) throw new Error("Request failed");
+
+      e.target.disabled = true;
+      e.target.textContent = "Requested";
+    } catch (err) {
+      console.error("🔥 Error:", err);
+      alert("Request failed");
+    }
+  }
+});
+
+
   </script>
 </body>
 </html>
