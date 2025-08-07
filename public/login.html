@@ -35,6 +35,7 @@
     if (res.ok) {
       const responseData = await res.json();  // ✅ Parse response body
       localStorage.setItem('loggedInUser', responseData.username);  // ✅ Store username
+      localStorage.setItem('loggedInUserId', responseData.userId);
       window.location.href = '/home.html'; // or res.url if your server redirects
     } else {
       const errorText = await res.text();

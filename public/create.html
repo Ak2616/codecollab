@@ -18,35 +18,52 @@
   </div>
 
   <script>
-    document.getElementById('projectForm').addEventListener('submit', async function (e) {
-      e.preventDefault();
+  document.getElementById('projectForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
 
-      const user = localStorage.getItem('loggedInUser');
-      if (!user) return alert("You're not logged in");
+    const username = localStorage.getItem('loggedInUser');
+    const userId = localStorage.getItem('loggedInUserId');
 
-      const formData = new FormData(this);
-      const data = Object.fromEntries(formData.entries());
-      data.created_by = user;
+    console.log("🧠 LocalStorage - Username:", username);
+    console.log("🧠 LocalStorage - User ID:", userId);
 
-      try {
-        const res = await fetch('/api/projects', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(data),
-        });
+    if (!username || !userId) {
+      alert("You're not logged in.");
+      return;
+    }
 
-        if (res.ok) {
-          window.location.href = 'home.html';
-        } else {
-          alert('Failed to create project');
-        }
-      } catch (err) {
-        console.error(err);
-        alert('Server error');
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData.entries());
+    data.created_by = username;
+    data.created_by_id = userId;
+
+    console.log("📦 Final Payload Being Sent:", data);
+
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      const json = await res.json();
+      console.log("📬 Server Response:", json);
+
+      if (res.ok) {
+        alert("✅ Project created successfully!");
+        window.location.href = 'home.html';
+      } else {
+        alert("❌ Failed to create project");
       }
-    });
-  </script>
+
+    } catch (err) {
+      console.error("🔥 Client Error:", err);
+      alert("Server error");
+    }
+  });
+</script>
+
 </body>
 </html>

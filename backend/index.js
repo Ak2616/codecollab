@@ -87,9 +87,11 @@ app.post('/login', async (req, res) => {
     const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, { expiresIn: '2h' });
 
     console.log("✅ Login successful:", user.email);
+    res.json({
+      username: user.username,
+      userId: user.id // ← add this
+    });
 
-    // Send JSON response with username
-    res.json({ username: user.username });
 
   } catch (err) {
     console.error("❌ Login DB Error:", err.message);
@@ -115,14 +117,28 @@ app.get('/api/projects', async (req, res) => {
 });
 
 app.post('/api/projects', async (req, res) => {
-  const { title, project_description, tech_stack, deadline, created_by } = req.body;
+  const {
+    title,
+    project_description,
+    tech_stack,
+    deadline,
+    created_by,
+    created_by_id,
+  } = req.body;
+
+  console.log("📥 Received Project Creation Payload:");
+  console.log({ title, project_description, tech_stack, deadline, created_by, created_by_id });
+
+  if (!created_by_id) {
+    console.warn("⚠️ Missing created_by_id!");
+  }
 
   try {
     const result = await db.query(
-      `INSERT INTO projects (title, project_description, tech_stack, deadline, created_by)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO projects (title, project_description, tech_stack, deadline, created_by, created_by_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [title, project_description, tech_stack, deadline, created_by]
+      [title, project_description, tech_stack, deadline, created_by, created_by_id]
     );
 
     res.status(201).json({ message: 'Project created', project: result.rows[0] });
