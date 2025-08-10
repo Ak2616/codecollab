@@ -23,43 +23,36 @@
 
     const username = localStorage.getItem('loggedInUser');
     const userId = localStorage.getItem('loggedInUserId');
+    const token = localStorage.getItem('authToken');
 
-    console.log("🧠 LocalStorage - Username:", username);
-    console.log("🧠 LocalStorage - User ID:", userId);
-
-    if (!username || !userId) {
+    if (!username || !userId || !token) {
       alert("You're not logged in.");
       return;
     }
 
     const formData = new FormData(this);
     const data = Object.fromEntries(formData.entries());
-    data.created_by = username;
-    data.created_by_id = userId;
-
-    console.log("📦 Final Payload Being Sent:", data);
-
+    // Server will derive created_by and created_by_id from token; we don't need to send them.
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(data),
       });
 
       const json = await res.json();
-      console.log("📬 Server Response:", json);
 
       if (res.ok) {
         alert("✅ Project created successfully!");
         window.location.href = 'home.html';
       } else {
-        alert("❌ Failed to create project");
+        alert(json?.message || '❌ Failed to create project');
       }
-
     } catch (err) {
-      console.error("🔥 Client Error:", err);
+      console.error("Client Error:", err);
       alert("Server error");
     }
   });

@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CodeCollab - Home</title>
   <style>
-    * {
+    /* [keep your original CSS here unchanged] */
+    /* ... omitted here for brevity in this snippet, but use your existing styles ... */
+        * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
@@ -217,14 +219,15 @@
   </style>
 </head>
 <body>
-  <script>
-    const user = localStorage.getItem('loggedInUser');
-    if (!user) {
-      window.location.href = 'index.html';
-    } else {
-      console.log("Welcome back, " + user);
-    }
-  </script>
+<script>
+  // quick auth gate — don't redeclare `token` (main script defines it later)
+  if (!localStorage.getItem('authToken')) {
+    window.location.href = 'index.html';
+  } else {
+    console.log("Welcome back, " + (localStorage.getItem('loggedInUser') || 'user'));
+  }
+</script>
+
 
   <header>
     <div class="logo">CodeCollab</div>
@@ -265,35 +268,22 @@
     <div class="rightbar">
       <div class="filters">
         <h3>🔍 Filter Projects</h3>
-<select id="stackFilter">
-  <option value="">All Stacks</option>
-  <option>Python</option>
-  <option>JavaScript</option>
-  <option>Go</option>
-  <option>Rust</option>
-</select>
+        <select id="stackFilter">
+          <option value="">All Stacks</option>
+          <option>Python</option>
+          <option>JavaScript</option>
+          <option>Go</option>
+          <option>Rust</option>
+        </select>
 
-<button id="clearFilters" type="button" style="
-  margin-top: 8px;
-  padding: 6px 10px;
-  background-color: #999;
-  color: white;
-  border: none;
-  border-radius: 5px;
-  font-size: 0.9rem;
-  cursor: pointer;
-  width: 100%;
-">
-  Clear Filters
-</button>
-
+        <button id="clearFilters" type="button" style="margin-top: 8px; padding: 6px 10px; background-color: #999; color: white; border: none; border-radius: 5px; font-size: 0.9rem; cursor: pointer; width: 100%;">Clear Filters</button>
       </div>
 
-      <div class="stats">
+      <div class="stats" id="statsBox">
         <h4>📊 Your Stats</h4>
-        <p>Projects Joined: 2</p>
-        <p>Requests Sent: 4</p>
-        <p>Pending Requests: 1</p>
+        <p id="joinedCount">Projects Joined: 0</p>
+        <p id="requestsSent">Requests Sent: 0</p>
+        <p id="pendingRequests">Pending Requests: 0</p>
       </div>
     </div>
   </div>
@@ -301,25 +291,49 @@
   <button type="button" class="create-project-btn" onclick="window.location.href='create.html'">Create Project</button>
 
   <script>
+    // === Utilities ===
+    const token = localStorage.getItem('authToken');
+    const username = localStorage.getItem('loggedInUser');
+    const userId = localStorage.getItem('loggedInUserId');
+
+    function redirectToLogin() {
+      localStorage.removeItem('authToken');
+      window.location.href = 'index.html';
+    }
+
+    function updateStatsUI(stats) {
+      document.getElementById('requestsSent').textContent = `Requests Sent: ${stats.requests_sent || 0}`;
+      document.getElementById('pendingRequests').textContent = `Pending Requests: ${stats.pending_requests || 0}`;
+      // If you track "projects joined" elsewhere, replace this line appropriately.
+      document.getElementById('joinedCount').textContent = `Projects Joined: ${stats.projects_joined || 0}`;
+    }
+
+    async function loadProjects() {
+      if (!token) return redirectToLogin();
+
+      try {
+        const res = await fetch('/api/projects', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+          if (res.status === 401) return redirectToLogin();
+          throw new Error('Failed to fetch projects');
+        }
+
+        const data = await res.json();
+        // data = { projects: [...], stats: {...} }
+        allProjects = data.projects || [];
+        updateStatsUI(data.stats || {});
+        renderProjects(allProjects);
+      } catch (err) {
+        console.error('Error fetching projects:', err);
+        document.getElementById('projects-container').innerHTML = '<p>Failed to load projects.</p>';
+      }
+    }
+
+    // === Rendering ===
     let allProjects = [];
-
-async function loadProjects() {
-  try {
-    const res = await fetch('/api/projects');
-    const allProjectsRaw = await res.json();  // correct assignment
-    const currentUser = localStorage.getItem('loggedInUser');
-    
-    // Filter out projects created by the current user
-    allProjects = allProjectsRaw.filter(p => p.created_by !== currentUser);
-    
-    renderProjects(allProjects);
-  } catch (err) {
-    console.error('Error fetching projects:', err);
-    document.getElementById('projects-container').innerHTML =
-      '<p>Failed to load projects.</p>';
-  }
-}
-
 
     function renderProjects(projects) {
       const container = document.getElementById('projects-container');
@@ -331,31 +345,27 @@ async function loadProjects() {
       }
 
       projects.forEach(project => {
+        // Skip projects that the server marked as requested
+        if (project.requested) return;
+
         const div = document.createElement('div');
         div.className = 'project';
-        const projectId = project._id || project.id;
+        const projectId = project.id;
 
         div.innerHTML = `
   <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-    <h3>${project.title}</h3>
-    <span style="
-      font-size: 0.8rem;
-      color: #666;
-      background-color: #eef1f5;
-      padding: 4px 8px;
-      border-radius: 5px;
-      font-weight: 500;
-    ">
-      👤 ${project.created_by || 'Unknown'}
+    <h3>${escapeHtml(project.title)}</h3>
+    <span style="font-size: 0.8rem; color: #666; background-color: #eef1f5; padding: 4px 8px; border-radius: 5px; font-weight: 500;">
+      👤 ${escapeHtml(project.created_by || 'Unknown')}
     </span>
   </div>
 
-  <span class="desc-link" onclick="toggleDescription('${projectId}')">Project Description</span>
-  <div class="project-desc" id="desc-${projectId}">
-    ${project.project_description}
+  <span class="desc-link" style="cursor:pointer;" onclick="toggleDescription('${projectId}')">Project Description</span>
+  <div class="project-desc" id="desc-${projectId}" style="display:none">
+    ${escapeHtml(project.project_description || '')}
   </div>
-  <p>Tech Stack Required: ${project.tech_stack}</p>
-  <p class="deadline">Deadline: ${new Date(project.deadline).toLocaleDateString()}</p>
+  <p>Tech Stack Required: ${escapeHtml(project.tech_stack || '')}</p>
+  <p class="deadline">Deadline: ${project.deadline ? new Date(project.deadline).toLocaleDateString() : 'N/A'}</p>
   <button type="button" class="join-btn request-btn" data-project-id="${projectId}">Request to Join</button>
 `;
 
@@ -363,20 +373,29 @@ async function loadProjects() {
       });
     }
 
-    function toggleDescription(id) {
-      const box = document.getElementById(`desc-${id}`);
-      if (box) {
-        box.style.display = box.style.display === 'none' ? 'block' : 'none';
-      }
+    // Basic escaping for simple injection safety in this static site
+    function escapeHtml(str) {
+      if (!str && str !== 0) return '';
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     }
 
+    function toggleDescription(id) {
+      const box = document.getElementById(`desc-${id}`);
+      if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // === Filters / UI helpers ===
     function applyFilters() {
       const stackValue = document.getElementById('stackFilter').value.toLowerCase();
-
       const filtered = allProjects.filter(project => {
+        if (project.requested) return false; // don't show requested projects
         return stackValue === '' || (project.tech_stack && project.tech_stack.toLowerCase().includes(stackValue));
       });
-
       renderProjects(filtered);
     }
 
@@ -387,10 +406,12 @@ async function loadProjects() {
 
     function logout() {
       localStorage.removeItem('loggedInUser');
+      localStorage.removeItem('loggedInUserId');
+      localStorage.removeItem('authToken');
       window.location.href = 'index.html';
     }
 
-    window.addEventListener('click', function (e) {
+    document.addEventListener('click', function (e) {
       if (!e.target.closest('.menu-container')) {
         document.getElementById('dropdownMenu').style.display = 'none';
       }
@@ -399,47 +420,70 @@ async function loadProjects() {
     document.getElementById('stackFilter').addEventListener('change', applyFilters);
 
     document.getElementById('clearFilters').addEventListener('click', () => {
-  document.getElementById('stackFilter').value = '';
-  renderProjects(allProjects);
-});
+      document.getElementById('stackFilter').value = '';
+      renderProjects(allProjects);
+    });
 
-
-    loadProjects();
+    // === Join request handler (delegates auth to server via token) ===
     document.addEventListener('click', async (e) => {
-  if (e.target && e.target.classList.contains('join-btn')) {
-    const userId = localStorage.getItem('loggedInUserId');
-    const username = localStorage.getItem('loggedInUser');
-    const projectId = e.target.dataset.projectId;
+      if (e.target && e.target.classList.contains('join-btn')) {
+        const btn = e.target;
+        const projectId = btn.dataset.projectId;
 
-    console.log("🧪 userId:", userId);
-    console.log("🧪 username:", username);
-    console.log("🧪 projectId:", projectId);
+        if (!token || !projectId) {
+          alert('Missing auth or project information. Please login again.');
+          return redirectToLogin();
+        }
 
-    if (!userId || !projectId || !username) {
-      console.error("❌ Missing data. Aborting request.");
-      alert("Request failed — missing user or project data.");
-      return;
-    }
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
 
-    try {
-      const res = await fetch('/api/join-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, username, projectId })
-      });
+        try {
+          const res = await fetch('/api/join-request', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ projectId })
+          });
 
-      if (!res.ok) throw new Error("Request failed");
+          const json = await res.json().catch(() => null);
 
-      e.target.disabled = true;
-      e.target.textContent = "Requested";
-    } catch (err) {
-      console.error("🔥 Error:", err);
-      alert("Request failed");
-    }
-  }
-});
+          if (res.status === 201 || (res.status === 200 && json && json.status === 'already_pending')) {
+            // Success / idempotent success -> remove card and update stats from server
+            const projectCard = btn.closest('.project');
+            if (projectCard) projectCard.remove();
 
+            if (json) {
+              updateStatsUI({ requests_sent: json.requests_sent, pending_requests: json.pending_requests });
+            } else {
+              // fallback: reload projects if we couldn't parse json
+              await loadProjects();
+            }
+          } else if (res.status === 400) {
+            alert(json?.message || 'Bad request');
+            btn.disabled = false;
+            btn.textContent = 'Request to Join';
+          } else if (res.status === 401) {
+            redirectToLogin();
+          } else {
+            console.error('Join request failed:', res.status, json);
+            alert('Request failed');
+            btn.disabled = false;
+            btn.textContent = 'Request to Join';
+          }
+        } catch (err) {
+          console.error("Error sending join request:", err);
+          alert("Request failed");
+          btn.disabled = false;
+          btn.textContent = 'Request to Join';
+        }
+      }
+    });
 
+    // initial load
+    loadProjects();
   </script>
 </body>
 </html>

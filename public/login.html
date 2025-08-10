@@ -11,16 +11,17 @@
   <div class="form-container">
     <h2>Login to CodeCollab</h2>
     <form id="loginForm">
-  <input type="email" name="email" placeholder="Email" required />
-  <input type="password" name="password" placeholder="Password" required />
-  <button type="submit">Login</button>
-</form>
+      <input type="email" name="email" placeholder="Email" required />
+      <input type="password" name="password" placeholder="Password" required />
+      <button type="submit">Login</button>
+    </form>
+  </div>
 
 <script>
   const form = document.getElementById('loginForm');
   form.addEventListener('submit', async function (e) {
     e.preventDefault();
-    
+
     const formData = new FormData(form);
     const email = formData.get('email');
     const password = formData.get('password');
@@ -32,16 +33,18 @@
         body: JSON.stringify({ email, password })
       });
 
-    if (res.ok) {
-      const responseData = await res.json();  // ✅ Parse response body
-      localStorage.setItem('loggedInUser', responseData.username);  // ✅ Store username
-      localStorage.setItem('loggedInUserId', responseData.userId);
-      window.location.href = '/home.html'; // or res.url if your server redirects
-    } else {
-      const errorText = await res.text();
-      alert(errorText);
-    }
-
+      if (res.ok) {
+        const responseData = await res.json();
+        // Save token and user info
+        localStorage.setItem('authToken', responseData.token);
+        localStorage.setItem('loggedInUser', responseData.username);
+        localStorage.setItem('loggedInUserId', responseData.userId);
+        window.location.href = '/home.html';
+      } else {
+        const errorJson = await res.json().catch(() => null);
+        const errorText = errorJson?.message || await res.text();
+        alert(errorText || 'Login failed');
+      }
     } catch (err) {
       console.error('Login error:', err);
       alert('Server error. Try again.');
@@ -49,6 +52,5 @@
   });
 </script>
 
-  </div>
 </body>
 </html>
