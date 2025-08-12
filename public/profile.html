@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Profile - CodeCollab</title>
+  <link rel="stylesheet" href="style.css" />
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background-color: #f9fafb;
+    color: #111827;
+    margin: 0;
+    padding: 0;
+  }
+  .profile-hero { display:flex; justify-content:space-between; gap:1rem; align-items:center; margin:1rem 0; }
+  .card { border:1px solid #d1d5db; padding:1rem; border-radius:8px; background:#ffffff; box-shadow:0 2px 6px rgba(0,0,0,0.05); }
+  .stats { display:flex; gap:1rem; }
+  .stat { min-width:120px; text-align:center; padding:0.75rem; }
+  .section { margin:1rem 0; }
+  .cards-grid { display:flex; flex-direction:column; gap:0.75rem; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:1rem; }
+  .btn { padding:0.4rem 0.7rem; border-radius:6px; cursor:pointer; border: none; font-weight:600; }
+  .btn-accept { background:#16a34a; color:white; }
+  .btn-accept:hover { background:#15803d; }
+  .btn-reject { background:#ef4444; color:white; }
+  .btn-reject:hover { background:#b91c1c; }
+  .badge { padding:0.25rem 0.6rem; border-radius:6px; font-size:0.85rem; font-weight:600; }
+  .badge-pending { background:#fbbf24; color:#1f2937; }
+  .badge-accepted { background:#16a34a; color:white; }
+  .badge-rejected { background:#6b7280; color:white; }
+  .muted { color:#6b7280; font-size:0.9rem; }
+</style>
+
+</head>
+<body>
+  <div class="container" style="max-width:1000px; margin:1.5rem auto;">
+    <div class="profile-hero">
+      <div>
+        <h2 id="usernameDisplay">—</h2>
+        <div class="muted" id="emailDisplay">—</div>
+      </div>
+      <div class="card stats">
+        <div class="stat">
+          <div class="muted">Ongoing</div>
+          <div id="ongoingCount">0</div>
+        </div>
+        <div class="stat">
+          <div class="muted">Requests Sent</div>
+          <div id="sentCount">0</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Incoming Requests</h3>
+      <div id="incomingList" class="cards-grid">
+        <!-- incoming cards inserted here -->
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Outgoing Requests</h3>
+      <div id="outgoingList" class="cards-grid">
+        <!-- outgoing cards inserted here -->
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Accepted Projects</h3>
+      <div id="acceptedList" class="cards-grid"></div>
+    </div>
+  </div>
+
+<script>
+(async function () {
+  const token = localStorage.getItem('authToken');
+  if (!token) {
+    // not logged in; fall back to index/login
+    window.location.href = 'login.html';
+    return;
+  }
+
+  // utility: status badge
+  function createStatusBadge(status) {
+    const span = document.createElement('span');
+    span.className = 'badge ' + (status === 'pending' ? 'badge-pending' : status === 'accepted' ? 'badge-accepted' : 'badge-rejected');
+    span.textContent = status;
+    return span;
+  }
+
+  // simple escaping
+  function escapeHtml(s = '') {
+    return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);
+  }
+
+  // render incoming card
+  function renderIncomingCard(reqObj) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.requestId = reqObj.request_id;
+
+    const title = document.createElement('div');
+    title.innerHTML = `<strong>${escapeHtml(reqObj.requester_username)}</strong> requested to join <em>${escapeHtml(reqObj.project_title)}</em>`;
+    const meta = document.createElement('div');
+    meta.className = 'muted';
+    meta.textContent = `on ${new Date(reqObj.requested_at).toLocaleString()} — ${reqObj.requester_email}`;
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    const left = document.createElement('div');
+    left.appendChild(title);
+    left.appendChild(meta);
+
+    const right = document.createElement('div');
+
+    // status badge
+    const statusBadge = createStatusBadge(reqObj.request_status || 'pending');
+    statusBadge.style.marginRight = '0.5rem';
+    statusBadge.classList.add('incoming-status');
+    right.appendChild(statusBadge);
+
+    // Only add Accept/Reject buttons if still pending
+    if (reqObj.request_status === 'pending') {
+      const acceptBtn = document.createElement('button');
+      acceptBtn.className = 'btn btn-accept';
+      acceptBtn.textContent = 'Accept';
+
+      const rejectBtn = document.createElement('button');
+      rejectBtn.className = 'btn btn-reject';
+      rejectBtn.textContent = 'Reject';
+
+      acceptBtn.onclick = async () => {
+        acceptBtn.disabled = true;
+        rejectBtn.disabled = true;
+        acceptBtn.textContent = 'Accepting...';
+        try {
+          const res = await fetch(`/api/requests/${reqObj.request_id}/accept`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const json = await res.json().catch(() => null);
+          if (res.ok && json && json.success) {
+            statusBadge.textContent = 'accepted';
+            statusBadge.className = 'badge badge-accepted incoming-status';
+            acceptBtn.remove(); rejectBtn.remove();
+
+            // update authoritative counts for the current owner (this page)
+            if (json.owner_stats && typeof json.owner_stats.ongoing !== 'undefined') {
+              document.getElementById('ongoingCount').textContent = json.owner_stats.ongoing;
+            }
+            // update outgoing/pending for requester if needed (not shown on this page)
+            // refresh profile lists to show accepted items
+            await loadProfile();
+          } else {
+            alert(json?.message || 'Failed to accept the request');
+            acceptBtn.disabled = false;
+            rejectBtn.disabled = false;
+            acceptBtn.textContent = 'Accept';
+          }
+        } catch (err) {
+          console.error(err);
+          alert('Server error');
+          acceptBtn.disabled = false;
+          rejectBtn.disabled = false;
+          acceptBtn.textContent = 'Accept';
+        }
+      };
+
+      rejectBtn.onclick = async () => {
+        acceptBtn.disabled = true;
+        rejectBtn.disabled = true;
+        rejectBtn.textContent = 'Rejecting...';
+        try {
+          const res = await fetch(`/api/requests/${reqObj.request_id}/reject`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const json = await res.json().catch(() => null);
+          if (res.ok && json && json.success) {
+            statusBadge.textContent = 'rejected';
+            statusBadge.className = 'badge badge-rejected incoming-status';
+            acceptBtn.remove(); rejectBtn.remove();
+            // refresh profile lists to show new state
+            await loadProfile();
+          } else {
+            alert(json?.message || 'Failed to reject the request');
+            acceptBtn.disabled = false;
+            rejectBtn.disabled = false;
+            rejectBtn.textContent = 'Reject';
+          }
+        } catch (err) {
+          console.error(err);
+          alert('Server error');
+          acceptBtn.disabled = false;
+          rejectBtn.disabled = false;
+          rejectBtn.textContent = 'Reject';
+        }
+      };
+
+      right.appendChild(acceptBtn);
+      right.appendChild(rejectBtn);
+    }
+
+    row.appendChild(left);
+    row.appendChild(right);
+    card.appendChild(row);
+    return card;
+  }
+
+  // render outgoing card
+  function renderOutgoingCard(reqObj) {
+    // Display pending outgoing; accepted will show in Accepted Projects section below
+    if (reqObj.request_status !== 'pending') {
+      return null;
+    }
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.requestId = reqObj.request_id;
+
+    const title = document.createElement('div');
+    title.innerHTML = `Requested <em>${escapeHtml(reqObj.project_title)}</em> from <strong>${escapeHtml(reqObj.owner_username)}</strong>`;
+    const meta = document.createElement('div');
+    meta.className = 'muted';
+    meta.textContent = `on ${new Date(reqObj.requested_at).toLocaleString()} — ${reqObj.owner_email}`;
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    const left = document.createElement('div');
+    left.appendChild(title);
+    left.appendChild(meta);
+
+    const right = document.createElement('div');
+    const badge = createStatusBadge(reqObj.request_status || 'pending');
+    right.appendChild(badge);
+
+    row.appendChild(left);
+    row.appendChild(right);
+    card.appendChild(row);
+    return card;
+  }
+
+async function loadProfile() {
+  const token = localStorage.getItem('authToken');
+  const username = localStorage.getItem('loggedInUser');
+  const userId = localStorage.getItem('loggedInUserId');
+
+  if (!token || !username || !userId) {
+    alert("You're not logged in.");
+    window.location.href = "login.html";
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/profile', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const json = await res.json();
+    console.log("Profile data:", json); // ✅ debug
+
+    // Adjust depending on structure
+    const userData = json.user || json;
+    document.getElementById('usernameDisplay').textContent = userData.username || '—';
+    document.getElementById('emailDisplay').textContent = userData.email || '—';
+
+    document.getElementById('sentCount').textContent = json.stats?.requests_sent ?? 0;
+    document.getElementById('ongoingCount').textContent = json.stats?.ongoing ?? 0;
+
+    const incomingList = document.getElementById('incomingList');
+    const outgoingList = document.getElementById('outgoingList');
+    const acceptedList = document.getElementById('acceptedList');
+    incomingList.innerHTML = '';
+    outgoingList.innerHTML = '';
+    acceptedList.innerHTML = '';
+
+    // Incoming: show pending and accepted (pending in Incoming section; accepted moved to Accepted)
+    json.incoming
+      ?.forEach(req => {
+        if (req.request_status === 'pending') {
+          incomingList.appendChild(renderIncomingCard(req));
+        }
+      });
+
+    // Outgoing: show pending outgoing
+    json.outgoing
+      ?.forEach(req => {
+        const card = renderOutgoingCard(req);
+        if (card) outgoingList.appendChild(card);
+      });
+
+    // Accepted (incoming accepted -> people who joined your projects)
+    json.incoming
+      ?.filter(req => req.request_status === 'accepted')
+      .forEach(req => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<div><strong>${escapeHtml(req.requester_username)}</strong> joined <em>${escapeHtml(req.project_title)}</em></div>
+                          <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
+        acceptedList.appendChild(card);
+      });
+
+    // Accepted (outgoing accepted -> you were accepted into others' projects)
+    json.outgoing
+      ?.filter(req => req.request_status === 'accepted')
+      .forEach(req => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<div>You joined <em>${escapeHtml(req.project_title)}</em> (owner: <strong>${escapeHtml(req.owner_username)}</strong>)</div>
+                          <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
+        acceptedList.appendChild(card);
+      });
+
+  } catch (err) {
+    console.error("Error loading profile:", err);
+    alert("Failed to load profile data.");
+  }
+}
+
+
+// initial load
+await loadProfile();
+
+})();
+</script>
+</body>
+</html>

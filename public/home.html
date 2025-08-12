@@ -6,8 +6,7 @@
   <title>CodeCollab - Home</title>
   <style>
     /* [keep your original CSS here unchanged] */
-    /* ... omitted here for brevity in this snippet, but use your existing styles ... */
-        * {
+    * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
@@ -231,17 +230,26 @@
 
   <header>
     <div class="logo">CodeCollab</div>
-    <div class="menu-container">
-      <div class="hamburger" onclick="toggleDropdown()">
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
-      <div class="dropdown" id="dropdownMenu">
-        <a href="#">Profile</a>
-        <a href="#">Settings</a>
-        <a href="#">Notifications</a>
-        <a href="#" onclick="logout()">Logout</a>
+    <div style="display: flex; align-items: center;">
+      <a href="profile.html" style="margin-right: 15px; display: flex; align-items: center; text-decoration: none;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="cursor: pointer;">
+          <circle cx="12" cy="12" r="11" stroke="#333" stroke-width="2"/>
+          <circle cx="12" cy="9" r="3" fill="#333"/>
+          <path d="M5 20c0-3.87 3.13-7 7-7s7 3.13 7 7" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </a>
+      <div class="menu-container">
+        <div class="hamburger" onclick="toggleDropdown()">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="dropdown" id="dropdownMenu">
+          <a href="./profile.html">Profile</a>
+          <a href="#">Settings</a>
+          <a href="#">Notifications</a>
+          <a href="#" onclick="logout()">Logout</a>
+        </div>
       </div>
     </div>
   </header>
@@ -303,8 +311,7 @@
 
     function updateStatsUI(stats) {
       document.getElementById('requestsSent').textContent = `Requests Sent: ${stats.requests_sent || 0}`;
-      document.getElementById('pendingRequests').textContent = `Pending Requests: ${stats.pending_requests || 0}`;
-      // If you track "projects joined" elsewhere, replace this line appropriately.
+      document.getElementById('pendingRequests').textContent = `Pending Requests: ${stats.requests_sent || 0}`;
       document.getElementById('joinedCount').textContent = `Projects Joined: ${stats.projects_joined || 0}`;
     }
 
@@ -345,7 +352,7 @@
       }
 
       projects.forEach(project => {
-        // Skip projects that the server marked as requested
+        // Skip projects that the server marked as requested (now any status)
         if (project.requested) return;
 
         const div = document.createElement('div');
@@ -450,13 +457,13 @@
 
           const json = await res.json().catch(() => null);
 
-          if (res.status === 201 || (res.status === 200 && json && json.status === 'already_pending')) {
+          if (res.status === 201 || (res.status === 200 && json && (json.status === 'already_exists' || json.status === 'already_pending'))) {
             // Success / idempotent success -> remove card and update stats from server
             const projectCard = btn.closest('.project');
             if (projectCard) projectCard.remove();
 
             if (json) {
-              updateStatsUI({ requests_sent: json.requests_sent, pending_requests: json.pending_requests });
+              updateStatsUI({ requests_sent: json.requests_sent, projects_joined: json.projects_joined });
             } else {
               // fallback: reload projects if we couldn't parse json
               await loadProjects();
