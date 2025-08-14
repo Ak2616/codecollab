@@ -30,6 +30,10 @@
   .badge-accepted { background:#16a34a; color:white; }
   .badge-rejected { background:#6b7280; color:white; }
   .muted { color:#6b7280; font-size:0.9rem; }
+  .profile-edit { margin-top: 0.75rem; }
+  .tag { display:inline-block; padding:4px 8px; margin-right:6px; background:#eef2ff; border-radius:999px; font-weight:600; font-size:0.9rem; }
+  .project-members { margin-top:8px; font-size:0.9rem; color:#333; }
+  .editable { border: 1px dashed #cbd5e1; padding:6px; border-radius:6px; background:#fff; }
 </style>
 
 </head>
@@ -39,6 +43,17 @@
       <div>
         <h2 id="usernameDisplay">—</h2>
         <div class="muted" id="emailDisplay">—</div>
+
+        <div id="bioDisplay" style="margin-top:0.5rem; max-width:700px;">—</div>
+
+        <div id="skillsDisplay" style="margin-top:0.75rem;"></div>
+
+        <div id="githubDisplay" style="margin-top:0.5rem;"></div>
+
+        <!-- Edit button visible only when owner -->
+        <div id="editControls" class="profile-edit" style="display:none;">
+          <button id="editProfileBtn" class="btn">Edit Profile</button>
+        </div>
       </div>
       <div class="card stats">
         <div class="stat">
@@ -52,36 +67,91 @@
       </div>
     </div>
 
-    <div class="section">
-      <h3>Incoming Requests</h3>
-      <div id="incomingList" class="cards-grid">
-        <!-- incoming cards inserted here -->
+    <div id="ownerSections">
+      <div class="section" id="incomingSection">
+        <h3>Incoming Requests</h3>
+        <div id="incomingList" class="cards-grid">
+          <!-- incoming cards inserted here -->
+        </div>
+      </div>
+
+      <div class="section" id="outgoingSection">
+        <h3>Outgoing Requests</h3>
+        <div id="outgoingList" class="cards-grid">
+          <!-- outgoing cards inserted here -->
+        </div>
       </div>
     </div>
 
     <div class="section">
-      <h3>Outgoing Requests</h3>
-      <div id="outgoingList" class="cards-grid">
-        <!-- outgoing cards inserted here -->
-      </div>
+      <h3>My Projects</h3>
+      <div id="ownedProjects" class="cards-grid"></div>
     </div>
 
     <div class="section">
-      <h3>Accepted Projects</h3>
-      <div id="acceptedList" class="cards-grid"></div>
+      <h3>Projects Joined</h3>
+      <div id="joinedProjects" class="cards-grid"></div>
     </div>
   </div>
+
+<!-- Edit modal (simple inline form) -->
+<div id="editModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); align-items:center; justify-content:center;">
+  <div style="background:#fff; padding:18px; border-radius:8px; width:480px; max-width:95%;">
+    <h3>Edit Profile</h3>
+    <form id="editForm">
+      <label>Skills (comma separated)</label>
+      <input type="text" name="skills" id="editSkills" style="width:100%; padding:8px; margin:6px 0;" required />
+      <label>Bio</label>
+      <textarea name="bio" id="editBio" rows="4" style="width:100%; padding:8px; margin:6px 0;"></textarea>
+      <label>GitHub (username or URL)</label>
+      <input type="text" name="github" id="editGithub" style="width:100%; padding:8px; margin:6px 0;" />
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" id="cancelEdit" class="btn">Cancel</button>
+        <button type="submit" class="btn btn-accept">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <script>
 (async function () {
   const token = localStorage.getItem('authToken');
-  if (!token) {
-    // not logged in; fall back to index/login
-    window.location.href = 'login.html';
-    return;
+  const meId = localStorage.getItem('loggedInUserId') ? parseInt(localStorage.getItem('loggedInUserId'), 10) : null;
+
+  // Utility: read query param user_id
+  function getQueryParam(name) {
+    const url = new URL(window.location.href);
+    return url.searchParams.get(name);
+  }
+  const viewUserIdParam = getQueryParam('user_id');
+  const viewingUserId = viewUserIdParam ? parseInt(viewUserIdParam, 10) : null;
+  const isOwnerView = viewingUserId ? (meId === viewingUserId) : true; // if no param, it's own profile
+
+  // helpers
+  function escapeHtml(s = '') {
+    return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);
   }
 
-  // utility: status badge
+  // Render helpers for project lists (members included)
+  function renderProjectCardWithMembers(p) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const ownerHtml = p.owner ? `${escapeHtml(p.owner.username)}` : escapeHtml(p.created_by || 'Unknown');
+    const membersHtml = (p.members || []).map(m => `<span class="tag">${escapeHtml(m.username)}</span>`).join(' ');
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <strong>${escapeHtml(p.title)}</strong>
+          <div class="muted">${escapeHtml(p.tech_stack || '')}</div>
+          <div class="project-members">Members: ${membersHtml || '<span class="muted">No members</span>'}</div>
+        </div>
+        <div class="muted">Deadline: ${p.deadline ? new Date(p.deadline).toLocaleDateString() : 'N/A'}</div>
+      </div>
+    `;
+    return card;
+  }
+
+  // Incoming card (owner-only)
   function createStatusBadge(status) {
     const span = document.createElement('span');
     span.className = 'badge ' + (status === 'pending' ? 'badge-pending' : status === 'accepted' ? 'badge-accepted' : 'badge-rejected');
@@ -89,19 +159,13 @@
     return span;
   }
 
-  // simple escaping
-  function escapeHtml(s = '') {
-    return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);
-  }
-
-  // render incoming card
   function renderIncomingCard(reqObj) {
     const card = document.createElement('div');
     card.className = 'card';
     card.dataset.requestId = reqObj.request_id;
 
     const title = document.createElement('div');
-    title.innerHTML = `<strong>${escapeHtml(reqObj.requester_username)}</strong> requested to join <em>${escapeHtml(reqObj.project_title)}</em>`;
+    title.innerHTML = `<strong><a class="user-link" href="profile.html?user_id=${reqObj.requester_id}">${escapeHtml(reqObj.requester_username)}</a></strong> requested to join <em>${escapeHtml(reqObj.project_title)}</em>`;
     const meta = document.createElement('div');
     meta.className = 'muted';
     meta.textContent = `on ${new Date(reqObj.requested_at).toLocaleString()} — ${reqObj.requester_email}`;
@@ -120,8 +184,8 @@
     statusBadge.classList.add('incoming-status');
     right.appendChild(statusBadge);
 
-    // Only add Accept/Reject buttons if still pending
-    if (reqObj.request_status === 'pending') {
+    // Only add Accept/Reject buttons if still pending and owner
+    if (reqObj.request_status === 'pending' && isOwnerView) {
       const acceptBtn = document.createElement('button');
       acceptBtn.className = 'btn btn-accept';
       acceptBtn.textContent = 'Accept';
@@ -145,13 +209,10 @@
             statusBadge.className = 'badge badge-accepted incoming-status';
             acceptBtn.remove(); rejectBtn.remove();
 
-            // update authoritative counts for the current owner (this page)
             if (json.owner_stats && typeof json.owner_stats.ongoing !== 'undefined') {
               document.getElementById('ongoingCount').textContent = json.owner_stats.ongoing;
             }
-            // update outgoing/pending for requester if needed (not shown on this page)
-            // refresh profile lists to show accepted items
-            await loadProfile();
+            await loadProfile(); // refresh lists
           } else {
             alert(json?.message || 'Failed to accept the request');
             acceptBtn.disabled = false;
@@ -181,7 +242,6 @@
             statusBadge.textContent = 'rejected';
             statusBadge.className = 'badge badge-rejected incoming-status';
             acceptBtn.remove(); rejectBtn.remove();
-            // refresh profile lists to show new state
             await loadProfile();
           } else {
             alert(json?.message || 'Failed to reject the request');
@@ -208,9 +268,8 @@
     return card;
   }
 
-  // render outgoing card
   function renderOutgoingCard(reqObj) {
-    // Display pending outgoing; accepted will show in Accepted Projects section below
+    // Display pending outgoing; accepted will show in Joined/Accepted section
     if (reqObj.request_status !== 'pending') {
       return null;
     }
@@ -219,7 +278,7 @@
     card.dataset.requestId = reqObj.request_id;
 
     const title = document.createElement('div');
-    title.innerHTML = `Requested <em>${escapeHtml(reqObj.project_title)}</em> from <strong>${escapeHtml(reqObj.owner_username)}</strong>`;
+    title.innerHTML = `Requested <em>${escapeHtml(reqObj.project_title)}</em> from <strong><a class="user-link" href="profile.html?user_id=${reqObj.owner_id}">${escapeHtml(reqObj.owner_username)}</a></strong>`;
     const meta = document.createElement('div');
     meta.className = 'muted';
     meta.textContent = `on ${new Date(reqObj.requested_at).toLocaleString()} — ${reqObj.owner_email}`;
@@ -240,85 +299,196 @@
     return card;
   }
 
-async function loadProfile() {
-  const token = localStorage.getItem('authToken');
-  const username = localStorage.getItem('loggedInUser');
-  const userId = localStorage.getItem('loggedInUserId');
-
-  if (!token || !username || !userId) {
-    alert("You're not logged in.");
-    window.location.href = "login.html";
-    return;
-  }
-
-  try {
-    const res = await fetch('/api/profile', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const json = await res.json();
-    console.log("Profile data:", json); // ✅ debug
-
-    // Adjust depending on structure
-    const userData = json.user || json;
-    document.getElementById('usernameDisplay').textContent = userData.username || '—';
-    document.getElementById('emailDisplay').textContent = userData.email || '—';
-
-    document.getElementById('sentCount').textContent = json.stats?.requests_sent ?? 0;
-    document.getElementById('ongoingCount').textContent = json.stats?.ongoing ?? 0;
-
-    const incomingList = document.getElementById('incomingList');
-    const outgoingList = document.getElementById('outgoingList');
-    const acceptedList = document.getElementById('acceptedList');
-    incomingList.innerHTML = '';
-    outgoingList.innerHTML = '';
-    acceptedList.innerHTML = '';
-
-    // Incoming: show pending and accepted (pending in Incoming section; accepted moved to Accepted)
-    json.incoming
-      ?.forEach(req => {
-        if (req.request_status === 'pending') {
-          incomingList.appendChild(renderIncomingCard(req));
+  async function loadProfile() {
+    try {
+      if (viewingUserId) {
+        // Public profile + projects endpoints
+        const userRes = await fetch(`/api/users/${viewingUserId}`);
+        if (!userRes.ok) {
+          if (userRes.status === 404) return alert('User not found');
+          throw new Error('Failed to fetch user');
         }
-      });
+        const userJson = await userRes.json();
+        const user = userJson.user;
+        document.getElementById('usernameDisplay').textContent = user.username || '—';
+        document.getElementById('emailDisplay').textContent = ''; // public profile doesn't reveal email
+        document.getElementById('bioDisplay').textContent = user.bio || '';
+        const skillsContainer = document.getElementById('skillsDisplay');
+        skillsContainer.innerHTML = '';
+        (user.skills || []).forEach(s => {
+          const el = document.createElement('span');
+          el.className = 'tag';
+          el.textContent = s;
+          skillsContainer.appendChild(el);
+        });
+        if (user.github_url) {
+          const gh = document.getElementById('githubDisplay');
+          gh.innerHTML = `<a href="${escapeHtml(user.github_url)}" target="_blank" rel="noreferrer">GitHub</a>`;
+        }
 
-    // Outgoing: show pending outgoing
-    json.outgoing
-      ?.forEach(req => {
-        const card = renderOutgoingCard(req);
-        if (card) outgoingList.appendChild(card);
-      });
+        // Owned projects
+        const ownedRes = await fetch(`/api/users/${viewingUserId}/projects/owned`);
+        const ownedJson = await ownedRes.json();
+        const ownedBox = document.getElementById('ownedProjects');
+        ownedBox.innerHTML = '';
+        (ownedJson.projects || []).forEach(p => ownedBox.appendChild(renderProjectCardWithMembers(p)));
 
-    // Accepted (incoming accepted -> people who joined your projects)
-    json.incoming
-      ?.filter(req => req.request_status === 'accepted')
-      .forEach(req => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `<div><strong>${escapeHtml(req.requester_username)}</strong> joined <em>${escapeHtml(req.project_title)}</em></div>
-                          <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
-        acceptedList.appendChild(card);
-      });
+        // Joined projects
+        const joinedRes = await fetch(`/api/users/${viewingUserId}/projects/joined`);
+        const joinedJson = await joinedRes.json();
+        const joinedBox = document.getElementById('joinedProjects');
+        joinedBox.innerHTML = '';
+        (joinedJson.projects || []).forEach(p => joinedBox.appendChild(renderProjectCardWithMembers(p)));
 
-    // Accepted (outgoing accepted -> you were accepted into others' projects)
-    json.outgoing
-      ?.filter(req => req.request_status === 'accepted')
-      .forEach(req => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `<div>You joined <em>${escapeHtml(req.project_title)}</em> (owner: <strong>${escapeHtml(req.owner_username)}</strong>)</div>
-                          <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
-        acceptedList.appendChild(card);
-      });
+        // Hide owner-only sections
+        document.getElementById('ownerSections').style.display = 'none';
+        // hide edit controls unless owner
+        document.getElementById('editControls').style.display = (isOwnerView ? 'block' : 'none');
 
-  } catch (err) {
-    console.error("Error loading profile:", err);
-    alert("Failed to load profile data.");
+      } else {
+        // Viewing own profile (current user). Need token.
+        if (!token) {
+          window.location.href = 'login.html';
+          return;
+        }
+
+        const res = await fetch('/api/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          if (res.status === 401) { window.location.href = 'login.html'; return; }
+          throw new Error('Failed to fetch profile');
+        }
+        const json = await res.json();
+
+        const userData = json.user || json;
+        document.getElementById('usernameDisplay').textContent = userData.username || '—';
+        document.getElementById('emailDisplay').textContent = userData.email || '—';
+        document.getElementById('bioDisplay').textContent = userData.bio || '';
+        const skillsContainer = document.getElementById('skillsDisplay');
+        skillsContainer.innerHTML = '';
+        (userData.skills || []).forEach(s => {
+          const el = document.createElement('span');
+          el.className = 'tag';
+          el.textContent = s;
+          skillsContainer.appendChild(el);
+        });
+        if (userData.github_url) {
+          const gh = document.getElementById('githubDisplay');
+          gh.innerHTML = `<a href="${escapeHtml(userData.github_url)}" target="_blank" rel="noreferrer">GitHub</a>`;
+        } else {
+          document.getElementById('githubDisplay').textContent = '';
+        }
+
+        document.getElementById('sentCount').textContent = json.stats?.requests_sent ?? 0;
+        document.getElementById('ongoingCount').textContent = json.stats?.ongoing ?? 0;
+
+        const incomingList = document.getElementById('incomingList');
+        const outgoingList = document.getElementById('outgoingList');
+        const acceptedList = document.getElementById('ownedProjects'); // reuse to show accepted joins (owner's view)
+        incomingList.innerHTML = '';
+        outgoingList.innerHTML = '';
+        acceptedList.innerHTML = '';
+
+        // Incoming: show pending only in the incoming area
+        (json.incoming || []).forEach(req => {
+          if (req.request_status === 'pending') incomingList.appendChild(renderIncomingCard(req));
+        });
+
+        // Outgoing: show pending outgoing
+        (json.outgoing || []).forEach(req => {
+          const card = renderOutgoingCard(req);
+          if (card) outgoingList.appendChild(card);
+        });
+
+        // Accepted incoming -> show in ownedProjects area
+        (json.incoming || []).filter(r => r.request_status === 'accepted')
+          .forEach(req => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `<div><strong><a class="user-link" href="profile.html?user_id=${req.requester_id}">${escapeHtml(req.requester_username)}</a></strong> joined <em>${escapeHtml(req.project_title)}</em></div>
+                              <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
+            acceptedList.appendChild(card);
+          });
+
+        // Also show outgoing accepted (joined others) in joinedProjects
+        (json.outgoing || []).filter(r => r.request_status === 'accepted')
+          .forEach(req => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `<div>You joined <em>${escapeHtml(req.project_title)}</em> (owner: <strong><a class="user-link" href="profile.html?user_id=${req.owner_id}">${escapeHtml(req.owner_username)}</a></strong>)</div>
+                              <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
+            document.getElementById('joinedProjects').appendChild(card);
+          });
+
+        // Show edit controls for owner
+        document.getElementById('editControls').style.display = 'block';
+      }
+    } catch (err) {
+      console.error("Error loading profile:", err);
+      alert("Failed to load profile data.");
+    }
   }
-}
 
+  // -- Edit modal handling (owner only)
+  const editModal = document.getElementById('editModal');
+  const editForm = document.getElementById('editForm');
+  document.getElementById('editProfileBtn').addEventListener('click', async () => {
+    // prefill form with current data
+    // fetch current profile if owner
+    if (!meId) return alert('Login to edit your profile.');
+    try {
+      const res = await fetch('/api/profile', { headers: { 'Authorization': `Bearer ${token}` }});
+      if (!res.ok) return alert('Failed to load your profile');
+      const json = await res.json();
+      const user = json.user;
+      document.getElementById('editSkills').value = (user.skills || []).join(', ');
+      document.getElementById('editBio').value = user.bio || '';
+      document.getElementById('editGithub').value = user.github_url || '';
+      editModal.style.display = 'flex';
+    } catch (err) {
+      console.error(err);
+      alert('Failed to load profile data');
+    }
+  });
 
-// initial load
-await loadProfile();
+  document.getElementById('cancelEdit').addEventListener('click', () => {
+    editModal.style.display = 'none';
+  });
+
+  editForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const skillsRaw = document.getElementById('editSkills').value || '';
+    const skillsArr = skillsRaw.split(',').map(s => s.trim()).filter(Boolean);
+    if (skillsArr.length === 0) return alert('Please enter at least one skill');
+
+    const bio = document.getElementById('editBio').value;
+    const github = document.getElementById('editGithub').value;
+
+    try {
+      const res = await fetch(`/api/users/${meId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ skills: skillsArr, bio, github_url: github })
+      });
+      const json = await res.json();
+      if (res.ok) {
+        editModal.style.display = 'none';
+        await loadProfile();
+      } else {
+        alert(json?.message || 'Failed to update profile');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Server error');
+    }
+  });
+
+  // initial load
+  await loadProfile();
 
 })();
 </script>

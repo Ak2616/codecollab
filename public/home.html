@@ -215,6 +215,13 @@
     .stats p {
       margin: 5px 0;
     }
+
+    a.user-link {
+      color: #0b5fff;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    a.user-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -291,7 +298,7 @@
         <h4>📊 Your Stats</h4>
         <p id="joinedCount">Projects Joined: 0</p>
         <p id="requestsSent">Requests Sent: 0</p>
-        <p id="pendingRequests">Pending Requests: 0</p>
+        <p id="pendingRequests">Incoming Requests: 0</p>
       </div>
     </div>
   </div>
@@ -311,7 +318,8 @@
 
     function updateStatsUI(stats) {
       document.getElementById('requestsSent').textContent = `Requests Sent: ${stats.requests_sent || 0}`;
-      document.getElementById('pendingRequests').textContent = `Pending Requests: ${stats.requests_sent || 0}`;
+      // pendingRequests now shows incoming pending (for owners)
+      document.getElementById('pendingRequests').textContent = `Incoming Requests: ${stats.pending_incoming || 0}`;
       document.getElementById('joinedCount').textContent = `Projects Joined: ${stats.projects_joined || 0}`;
     }
 
@@ -352,18 +360,23 @@
       }
 
       projects.forEach(project => {
-        // Skip projects that the server marked as requested (now any status)
+        // Hide projects if the server marked them as requested (pending or accepted) but not if request was rejected
         if (project.requested) return;
 
         const div = document.createElement('div');
         div.className = 'project';
         const projectId = project.id;
 
+        // Use created_by_id to build links; fallback to plain text
+        const ownerName = project.created_by || 'Unknown';
+        const ownerId = project.created_by_id;
+        const ownerHtml = ownerId ? `<a class="user-link" href="profile.html?user_id=${ownerId}">${escapeHtml(ownerName)}</a>` : escapeHtml(ownerName);
+
         div.innerHTML = `
   <div style="display: flex; justify-content: space-between; align-items: flex-start;">
     <h3>${escapeHtml(project.title)}</h3>
     <span style="font-size: 0.8rem; color: #666; background-color: #eef1f5; padding: 4px 8px; border-radius: 5px; font-weight: 500;">
-      👤 ${escapeHtml(project.created_by || 'Unknown')}
+      👤 ${ownerHtml}
     </span>
   </div>
 
@@ -463,7 +476,7 @@
             if (projectCard) projectCard.remove();
 
             if (json) {
-              updateStatsUI({ requests_sent: json.requests_sent, projects_joined: json.projects_joined });
+              updateStatsUI({ requests_sent: json.requests_sent, projects_joined: json.projects_joined, pending_incoming: null });
             } else {
               // fallback: reload projects if we couldn't parse json
               await loadProjects();

@@ -1,5 +1,4 @@
 // File: backend/index.js
-
 const express = require('express');
 const path = require('path');
 const bcrypt = require('bcrypt');
@@ -43,28 +42,55 @@ app.get('/', (req, res) => {
   res.send('🚀 CodeCollab API is running');
 });
 
-// Signup route
+// ------------------------ AUTH ------------------------
+
+// Signup route (now requires skills; accepts optional bio, github_url)
 app.post('/signup', async (req, res) => {
-  const { username, email, password } = req.body;
   try {
+    const { username, email, password, skills, bio, github_url } = req.body;
+
+    if (!username || !email || !password) {
+      return res.status(400).json({ message: 'username, email and password are required' });
+    }
+
+    // Skills must be provided (either array or comma-separated string)
+    let skillsArray = [];
+    if (Array.isArray(skills)) {
+      skillsArray = skills.map(s => String(s).trim()).filter(Boolean);
+    } else if (typeof skills === 'string') {
+      skillsArray = skills.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    if (!skillsArray || skillsArray.length === 0) {
+      return res.status(400).json({ message: 'Please provide at least one skill' });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const result = await db.query(
-      'INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING id, username, email',
-      [username, email, hashedPassword]
+    const insertRes = await db.query(
+      `INSERT INTO users (username, email, password, skills, bio, github_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, username, email`,
+      [username, email, hashedPassword, JSON.stringify(skillsArray), bio || null, github_url || null]
     );
 
-    res.status(201).json({ message: 'User created successfully', user: result.rows[0] });
+    const createdUser = insertRes.rows[0];
+    res.status(201).json({ message: 'User created successfully', user: createdUser });
   } catch (err) {
-    console.error("Signup DB Error:", err.message);
-    if (err.code === '23505') {
-      return res.status(400).json({ message: 'Email already exists' });
+    console.error("Signup DB Error:", err && err.message);
+    // Unique contraint error handling for email/username
+    if (err && err.code === '23505') {
+      // Determine which constraint violated if possible
+      const detail = err.detail || '';
+      if (detail.includes('email')) return res.status(400).json({ message: 'Email already exists' });
+      if (detail.includes('username')) return res.status(400).json({ message: 'Username already exists' });
+      return res.status(400).json({ message: 'Duplicate field value' });
     }
     res.status(500).json({ message: 'Error creating user' });
   }
 });
 
-// Login route (now returns JWT)
+// Login route (returns JWT)
 app.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -95,12 +121,13 @@ app.post('/login', async (req, res) => {
       token
     });
   } catch (err) {
-    console.error("Login DB Error:", err.message);
+    console.error("Login DB Error:", err && err.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// Serve home.html (still available if needed)
+// ------------------------ PROJECTS & JOIN REQUESTS ------------------------
+
 app.get('/home', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/home.html'));
 });
@@ -108,9 +135,9 @@ app.get('/home', (req, res) => {
 /**
  * GET /api/projects
  * Protected. Returns:
- * { projects: [...], stats: { requests_sent, projects_joined } }
- * Projects are filtered to exclude projects created by the current user.
- * Each project includes `requested: boolean` indicating whether current user has any join_request (any status).
+ * { projects: [...], stats: { requests_sent, projects_joined, pending_incoming } }
+ * Projects exclude those created by current user.
+ * Each project includes `requested: boolean` indicating whether current user has an active/pending/accepted request (but rejected is ignored).
  */
 app.get('/api/projects', verifyToken, async (req, res) => {
   const userId = req.user.id;
@@ -118,7 +145,8 @@ app.get('/api/projects', verifyToken, async (req, res) => {
   try {
     const projectsQuery = `
       SELECT p.*,
-             (jr.id IS NOT NULL) AS requested
+             -- If there's a join_request that is NOT 'rejected' for current user, mark requested
+             (jr.id IS NOT NULL AND jr.request_status IS DISTINCT FROM 'rejected') AS requested
       FROM projects p
       LEFT JOIN join_requests jr
         ON jr.project_id = p.id
@@ -128,20 +156,23 @@ app.get('/api/projects', verifyToken, async (req, res) => {
     `;
     const projectsResult = await db.query(projectsQuery, [userId]);
 
-    // Stats: pending_requests (outgoing pending), projects_joined (accepted outgoing)
+    // Stats:
     const statsQuery = `
       SELECT
         COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'pending') AS requests_sent,
-        COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined
-      FROM join_requests
+        COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined,
+        COUNT(*) FILTER (WHERE p.created_by_id = $1 AND jr.request_status = 'pending') AS pending_incoming
+      FROM join_requests jr
+      LEFT JOIN projects p ON jr.project_id = p.id
     `;
     const statsResult = await db.query(statsQuery, [userId]);
 
-    const statsRow = statsResult.rows[0] || { requests_sent: 0, projects_joined: 0 };
+    const statsRow = statsResult.rows[0] || { requests_sent: 0, projects_joined: 0, pending_incoming: 0 };
 
     const stats = {
       requests_sent: parseInt(statsRow.requests_sent, 10) || 0,
-      projects_joined: parseInt(statsRow.projects_joined, 10) || 0
+      projects_joined: parseInt(statsRow.projects_joined, 10) || 0,
+      pending_incoming: parseInt(statsRow.pending_incoming, 10) || 0
     };
 
     res.json({ projects: projectsResult.rows, stats });
@@ -153,8 +184,8 @@ app.get('/api/projects', verifyToken, async (req, res) => {
 
 /**
  * POST /api/projects
- * Protected. Uses token-derived user as creator (server-side).
- * Body: { title, project_description, tech_stack, deadline }
+ * Protected. Body: { title, project_description, tech_stack, deadline }
+ * Owner is inserted to project_members as well.
  */
 app.post('/api/projects', verifyToken, async (req, res) => {
   const { title, project_description, tech_stack, deadline } = req.body;
@@ -169,7 +200,30 @@ app.post('/api/projects', verifyToken, async (req, res) => {
       [title, project_description, tech_stack, deadline, created_by, created_by_id]
     );
 
-    res.status(201).json({ message: 'Project created', project: result.rows[0] });
+    const project = result.rows[0];
+
+    // Insert owner as a member (idempotent)
+    try {
+      await db.query(
+        `INSERT INTO project_members (project_id, user_id, role)
+         VALUES ($1, $2, 'owner')
+         ON CONFLICT ON CONSTRAINT project_members_project_id_user_id_key
+         DO NOTHING`,
+        [project.id, created_by_id]
+      );
+    } catch (pmErr) {
+      // If constraint name unknown, use fallback ON CONFLICT DO NOTHING
+      try {
+        await db.query(
+          `INSERT INTO project_members (project_id, user_id, role)
+           VALUES ($1, $2, 'owner')
+           ON CONFLICT (project_id, user_id) DO NOTHING`,
+          [project.id, created_by_id]
+        );
+      } catch (_) { /* log if you want */ }
+    }
+
+    res.status(201).json({ message: 'Project created', project });
   } catch (err) {
     console.error("Error creating project:", err);
     res.status(400).json({ error: 'Failed to create project' });
@@ -179,8 +233,6 @@ app.post('/api/projects', verifyToken, async (req, res) => {
 /**
  * POST /api/join-request
  * Protected. Body: { projectId }
- * Server derives userId from token.
- * Returns authoritative counts and status.
  */
 app.post('/api/join-request', verifyToken, async (req, res) => {
   const userId = req.user.id;
@@ -204,75 +256,86 @@ app.post('/api/join-request', verifyToken, async (req, res) => {
     }
 
     // Try to insert; ON CONFLICT uses the new table-level unique constraint
-    const insertRes = await db.query(
-      `INSERT INTO join_requests (user_id, project_id, request_status, requested_at)
-       VALUES ($1, $2, 'pending', NOW())
-       ON CONFLICT ON CONSTRAINT unique_user_project
-       DO NOTHING
-       RETURNING id`,
-      [userId, projectId]
-    );
+    try {
+      const insertRes = await db.query(
+        `INSERT INTO join_requests (user_id, project_id, request_status, requested_at)
+         VALUES ($1, $2, 'pending', NOW())
+         ON CONFLICT ON CONSTRAINT unique_user_project
+         DO NOTHING
+         RETURNING id`,
+        [userId, projectId]
+      );
 
-    const created = insertRes.rowCount === 1;
-    const status = created ? 'created' : 'already_exists';
+      const created = insertRes.rowCount === 1;
+      const status = created ? 'created' : 'already_exists';
 
-    // Return authoritative stats for the requester (pending outgoing and projects_joined)
-    const statsResult = await db.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'pending') AS requests_sent,
-         COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined
-       FROM join_requests`,
-      [userId]
-    );
-    const row = statsResult.rows[0] || { requests_sent: 0, projects_joined: 0 };
+      // Return authoritative stats for the requester (pending outgoing and projects_joined)
+      const statsResult = await db.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'pending') AS requests_sent,
+           COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined
+         FROM join_requests`,
+        [userId]
+      );
+      const row = statsResult.rows[0] || { requests_sent: 0, projects_joined: 0 };
 
-    const response = {
-      projectId,
-      status,
-      requests_sent: parseInt(row.requests_sent, 10) || 0,
-      projects_joined: parseInt(row.projects_joined, 10) || 0
-    };
+      const response = {
+        projectId,
+        status,
+        requests_sent: parseInt(row.requests_sent, 10) || 0,
+        projects_joined: parseInt(row.projects_joined, 10) || 0
+      };
 
-    const code = created ? 201 : 200;
-    return res.status(code).json(response);
-  } catch (err) {
-    // If the migration hasn't been applied, ON CONFLICT ON CONSTRAINT will error — fallback to insertion/catch
-    if (err && err.code === '42704') {
-      // Constraint doesn't exist — fallback to old behavior
-      try {
-        let status = 'created';
+      const code = created ? 201 : 200;
+      return res.status(code).json(response);
+    } catch (insertErr) {
+      // Fallback if constraint name missing / DB mismatched
+      if (insertErr && insertErr.code === '42704') {
+        // Fallback insertion
         try {
           await db.query(
             `INSERT INTO join_requests (user_id, project_id, request_status, requested_at)
              VALUES ($1, $2, 'pending', NOW())`,
             [userId, projectId]
           );
+          const statsResult = await db.query(
+            `SELECT
+               COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'pending') AS requests_sent,
+               COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined
+             FROM join_requests`,
+            [userId]
+          );
+          const row = statsResult.rows[0] || { requests_sent: 0, projects_joined: 0 };
+          return res.status(201).json({
+            projectId,
+            status: 'created',
+            requests_sent: parseInt(row.requests_sent, 10) || 0,
+            projects_joined: parseInt(row.projects_joined, 10) || 0
+          });
         } catch (ie) {
-          if (ie.code === '23505') status = 'already_pending';
-          else throw ie;
+          if (ie.code === '23505') {
+            // already pending/exists
+            const statsResult = await db.query(
+              `SELECT
+                 COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'pending') AS requests_sent,
+                 COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined
+               FROM join_requests`,
+              [userId]
+            );
+            const row = statsResult.rows[0] || { requests_sent: 0, projects_joined: 0 };
+            return res.status(200).json({
+              projectId,
+              status: 'already_exists',
+              requests_sent: parseInt(row.requests_sent, 10) || 0,
+              projects_joined: parseInt(row.projects_joined, 10) || 0
+            });
+          }
+          throw ie;
         }
-        const statsResult = await db.query(
-          `SELECT
-             COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'pending') AS requests_sent,
-             COUNT(*) FILTER (WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined
-           FROM join_requests`,
-          [userId]
-        );
-        const row = statsResult.rows[0] || { requests_sent: 0, projects_joined: 0 };
-        const response = {
-          projectId,
-          status,
-          requests_sent: parseInt(row.requests_sent, 10) || 0,
-          projects_joined: parseInt(row.projects_joined, 10) || 0
-        };
-        const code = status === 'created' ? 201 : 200;
-        return res.status(code).json(response);
-      } catch (finalErr) {
-        console.error("Fallback insert error:", finalErr);
-        return res.status(500).json({ message: 'Failed to send join request' });
       }
+      throw insertErr;
     }
-
+  } catch (err) {
     console.error("Unexpected error in join-request:", err);
     return res.status(500).json({ message: 'Server error' });
   }
@@ -280,12 +343,12 @@ app.post('/api/join-request', verifyToken, async (req, res) => {
 
 // -------------------- profile & request-management endpoints --------------------
 
-// GET /api/profile
+// GET /api/profile  -> current user (protected)
 app.get('/api/profile', verifyToken, async (req, res) => {
   const userId = req.user.id;
 
   try {
-    const userRes = await db.query(`SELECT id, username, email FROM users WHERE id = $1`, [userId]);
+    const userRes = await db.query(`SELECT id, username, email, skills, bio, github_url FROM users WHERE id = $1`, [userId]);
     if (userRes.rows.length === 0) return res.status(404).json({ message: 'User not found' });
     const user = userRes.rows[0];
 
@@ -303,7 +366,6 @@ app.get('/api/profile', verifyToken, async (req, res) => {
     const acceptedIncoming = parseInt(s.accepted_incoming, 10) || 0;
     const stats = {
       projects_owned: parseInt(s.projects_owned, 10) || 0,
-      // requests_sent is pending outgoing
       requests_sent: parseInt(s.requests_sent, 10) || 0,
       pending_incoming: parseInt(s.pending_incoming, 10) || 0,
       accepted_outgoing: acceptedOutgoing,
@@ -342,7 +404,171 @@ app.get('/api/profile', verifyToken, async (req, res) => {
   }
 });
 
+// ---------------- Public profile endpoints -----------------
+
+// GET /api/users/:id  (public) - returns public profile data and some stats
+app.get('/api/users/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ message: 'Invalid user id' });
+
+  try {
+    const userRes = await db.query(`SELECT id, username, skills, bio, github_url FROM users WHERE id = $1`, [id]);
+    if (userRes.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+
+    const statsQuery = `
+      SELECT
+        (SELECT COUNT(*)::int FROM projects WHERE created_by_id = $1) AS projects_owned,
+        (SELECT COUNT(*)::int FROM join_requests WHERE user_id = $1 AND request_status = 'accepted') AS projects_joined
+    `;
+    const statsRes = await db.query(statsQuery, [id]);
+    const stats = statsRes.rows[0] || { projects_owned: 0, projects_joined: 0 };
+
+    return res.json({ user: userRes.rows[0], stats });
+  } catch (err) {
+    console.error("Error fetching user profile:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /api/users/:id/projects/owned  (public) - returns projects with members (accepted members)
+app.get('/api/users/:id/projects/owned', async (req, res) => {
+  const ownerId = parseInt(req.params.id, 10);
+  if (!ownerId) return res.status(400).json({ message: 'Invalid user id' });
+
+  try {
+    const projectsRes = await db.query(
+      `SELECT p.* FROM projects p WHERE p.created_by_id = $1 ORDER BY p.id DESC`,
+      [ownerId]
+    );
+    const projects = projectsRes.rows;
+
+    // For each project, fetch members from project_members -> users
+    const projectIds = projects.map(p => p.id);
+    let membersByProject = {};
+    if (projectIds.length > 0) {
+      const membersRes = await db.query(
+        `SELECT pm.project_id, u.id AS user_id, u.username
+         FROM project_members pm
+         JOIN users u ON pm.user_id = u.id
+         WHERE pm.project_id = ANY ($1::int[])
+         ORDER BY pm.joined_at ASC`,
+        [projectIds]
+      );
+      membersRes.rows.forEach(r => {
+        if (!membersByProject[r.project_id]) membersByProject[r.project_id] = [];
+        membersByProject[r.project_id].push({ id: r.user_id, username: r.username });
+      });
+    }
+
+    const out = projects.map(p => ({ ...p, members: membersByProject[p.id] || [] }));
+    return res.json({ projects: out });
+  } catch (err) {
+    console.error("Error fetching owned projects:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /api/users/:id/projects/joined (public) - returns projects that the user is a member of
+app.get('/api/users/:id/projects/joined', async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!userId) return res.status(400).json({ message: 'Invalid user id' });
+
+  try {
+    // join project_members to get projects
+    const pjRes = await db.query(
+      `SELECT p.*, owner.id AS owner_id, owner.username AS owner_username
+       FROM project_members pm
+       JOIN projects p ON pm.project_id = p.id
+       JOIN users owner ON p.created_by_id = owner.id
+       WHERE pm.user_id = $1
+       ORDER BY p.id DESC`,
+      [userId]
+    );
+    const projects = pjRes.rows;
+    const projectIds = projects.map(p => p.id);
+
+    let membersByProject = {};
+    if (projectIds.length > 0) {
+      const membersRes = await db.query(
+        `SELECT pm.project_id, u.id AS user_id, u.username
+         FROM project_members pm
+         JOIN users u ON pm.user_id = u.id
+         WHERE pm.project_id = ANY ($1::int[])
+         ORDER BY pm.joined_at ASC`,
+        [projectIds]
+      );
+      membersRes.rows.forEach(r => {
+        if (!membersByProject[r.project_id]) membersByProject[r.project_id] = [];
+        membersByProject[r.project_id].push({ id: r.user_id, username: r.username });
+      });
+    }
+
+    const out = projects.map(p => ({
+      ...p,
+      owner: { id: p.owner_id, username: p.owner_username },
+      members: membersByProject[p.id] || []
+    }));
+    return res.json({ projects: out });
+  } catch (err) {
+    console.error("Error fetching joined projects:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PATCH /api/users/:id  -> update profile (skills, bio, github_url). Owner-only.
+app.patch('/api/users/:id', verifyToken, async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  const callerId = req.user.id;
+  if (callerId !== userId) return res.status(403).json({ message: 'Not authorized' });
+
+  const { skills, bio, github_url } = req.body;
+
+  try {
+    let skillsArray = null;
+    if (typeof skills !== 'undefined') {
+      if (Array.isArray(skills)) skillsArray = skills.map(s => String(s).trim()).filter(Boolean);
+      else if (typeof skills === 'string') skillsArray = skills.split(',').map(s => s.trim()).filter(Boolean);
+      else return res.status(400).json({ message: 'Invalid skills format' });
+
+      if (!skillsArray || skillsArray.length === 0) {
+        return res.status(400).json({ message: 'Please provide at least one skill' });
+      }
+    }
+
+    const updateParts = [];
+    const params = [];
+    let idx = 1;
+
+    if (skillsArray !== null) {
+      updateParts.push(`skills = $${idx++}`);
+      params.push(JSON.stringify(skillsArray));
+    }
+    if (typeof bio !== 'undefined') {
+      updateParts.push(`bio = $${idx++}`);
+      params.push(bio || null);
+    }
+    if (typeof github_url !== 'undefined') {
+      updateParts.push(`github_url = $${idx++}`);
+      params.push(github_url || null);
+    }
+
+    if (updateParts.length === 0) {
+      return res.status(400).json({ message: 'No updates provided' });
+    }
+
+    const sql = `UPDATE users SET ${updateParts.join(', ')} WHERE id = $${idx} RETURNING id, username, skills, bio, github_url`;
+    params.push(userId);
+    const updateRes = await db.query(sql, params);
+
+    return res.json({ user: updateRes.rows[0] });
+  } catch (err) {
+    console.error("Error updating user profile:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // POST /api/requests/:id/accept  -> only project owner can accept
+// Also inserts into project_members (idempotent)
 app.post('/api/requests/:id/accept', verifyToken, async (req, res) => {
   const requestId = parseInt(req.params.id, 10);
   const ownerId = req.user.id;
@@ -369,6 +595,20 @@ app.post('/api/requests/:id/accept', verifyToken, async (req, res) => {
 
     const updated = updateRes.rows[0];
     const requesterId = updated.requester_id;
+    const projectId = updated.project_id;
+
+    // Insert into project_members idempotently
+    try {
+      await db.query(
+        `INSERT INTO project_members (project_id, user_id, role, joined_at)
+         VALUES ($1, $2, 'member', NOW())
+         ON CONFLICT (project_id, user_id) DO NOTHING`,
+        [projectId, requesterId]
+      );
+    } catch (pmErr) {
+      // ignore insertion errors (we tried)
+      console.error("project_members insert error (ignored):", pmErr && pmErr.message);
+    }
 
     // Compute authoritative counts:
     const ownerStatsRes = await db.query(
@@ -414,7 +654,6 @@ app.post('/api/requests/:id/accept', verifyToken, async (req, res) => {
 });
 
 // POST /api/requests/:id/reject  -> only project owner can reject
-// Returns owner_stats for convenience on frontend refresh
 app.post('/api/requests/:id/reject', verifyToken, async (req, res) => {
   const requestId = parseInt(req.params.id, 10);
   const ownerId = req.user.id;

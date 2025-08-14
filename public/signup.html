@@ -14,6 +14,16 @@
       <input type="text" name="username" placeholder="Username" required />
       <input type="email" name="email" placeholder="Email" required />
       <input type="password" name="password" placeholder="Password" required />
+
+      <!-- NEW: skills (required) - comma separated -->
+      <input type="text" name="skills" id="skillsInput" placeholder="Skills (comma separated, e.g. JavaScript,Go,SQL)" required />
+
+      <!-- NEW: optional bio -->
+      <textarea name="bio" placeholder="Short bio (optional)" rows="3"></textarea>
+
+      <!-- NEW: optional GitHub -->
+      <input type="text" name="github" placeholder="GitHub (optional) - username or full URL" />
+
       <button type="submit">Create Account</button>
     </form>
     <div class="message" id="messageBox"></div>
@@ -23,10 +33,23 @@
     document.getElementById('signupForm').addEventListener('submit', async function (e) {
       e.preventDefault();
 
+      const skillsRaw = this.skills.value || '';
+      const skillsArr = skillsRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+      if (skillsArr.length === 0) {
+        const box = document.getElementById('messageBox');
+        box.innerText = 'Please enter at least one skill (comma separated)';
+        box.style.color = '#ef4444';
+        return;
+      }
+
       const data = {
-        username: this.username.value,
-        email: this.email.value,
+        username: this.username.value.trim(),
+        email: this.email.value.trim(),
         password: this.password.value,
+        skills: skillsArr,
+        bio: this.bio.value.trim() || null,
+        github_url: this.github.value.trim() || null
       };
 
       try {
@@ -38,10 +61,15 @@
 
         const result = await res.json();
         const box = document.getElementById('messageBox');
-        box.innerText = result.message;
+        box.innerText = result.message || (result?.user ? 'Account created' : 'Unknown response');
         box.style.color = res.ok ? '#10b981' : '#ef4444';
 
-        if (res.ok) this.reset();
+        if (res.ok) {
+          // Redirect to login for user to sign in
+          setTimeout(() => {
+            window.location.href = 'login.html';
+          }, 900);
+        }
       } catch (err) {
         const box = document.getElementById('messageBox');
         box.innerText = 'Server error. Try again.';
