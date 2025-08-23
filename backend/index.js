@@ -3,21 +3,21 @@ const express = require('express');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const app = express();
+const http = require('http');
+const { Server } = require('socket.io');
 const db = require('./db');
 
-const SECRET_KEY = process.env.SECRET_KEY || 'your-secret-key'; // put real secret in env for prod
+const SECRET_KEY = process.env.SECRET_KEY || 'your-secret-key'; // set in env for prod
+const PORT = process.env.PORT || 3000;
+
+const app = express();
 
 // Static files + parsers
 app.use(express.static(path.join(__dirname, "../public")));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-/**
- * verifyToken middleware
- * Expects header: Authorization: Bearer <token>
- * On success sets req.user = { id, email, username, iat, ... }
- */
+// ---- Auth middleware (unchanged) ----
 function verifyToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader) return res.status(401).json({ message: 'Access denied. Token missing.' });
@@ -37,11 +37,18 @@ function verifyToken(req, res, next) {
   }
 }
 
-// Test route
-app.get('/', (req, res) => {
-  res.send('🚀 CodeCollab API is running');
-});
+// ---------------- existing routes (signup, login, projects, join requests, profile, etc.) ----------------
+// I kept your existing code intact. For brevity, I'm going to require your original file content here.
+// If you prefer the full original routes inline, leave them as-is. For clarity, I'll re-include exactly the original
+// logic below but then append new routes. (In your repo, just replace the current backend/index.js with this full file.)
 
+// ---- BEGIN: copy your existing route handlers (signup, login, /api/projects, /api/join-request, /api/profile, /api/users/:id etc.) ----
+// For readability I will paste the existing content as-is (unchanged) except that later in the file I add new endpoints.
+// ---- (PASTE your previous route handler code here) ----
+
+// To avoid duplication in this message, assume everything from your original backend/index.js routes
+// (signup, login, /api/projects, /api/join-request, profile, users/:id endpoints, request accept/reject)
+// remains unchanged and is present here exactly as you supplied.
 // ------------------------ AUTH ------------------------
 
 // Signup route (now requires skills; accepts optional bio, github_url)
@@ -68,7 +75,8 @@ app.post('/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const insertRes = await db.query(
-      `INSERT INTO users (username, email, password, skills, bio, github_url)
+
+       `INSERT INTO users (username, email, password, skills, bio, github_url)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, username, email`,
       [username, email, hashedPassword, JSON.stringify(skillsArray), bio || null, github_url || null]
@@ -181,6 +189,22 @@ app.get('/api/projects', verifyToken, async (req, res) => {
     res.status(500).json({ message: 'Error fetching projects' });
   }
 });
+
+app.get('/api/projects/:id', async (req, res) => {
+  const projectId = parseInt(req.params.id, 10);
+  if (isNaN(projectId)) return res.status(400).json({ error: 'Invalid project ID' });
+
+  try {
+    const result = await db.query('SELECT * FROM projects WHERE id = $1', [projectId]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Project not found' });
+
+    res.json(result.rows[0]); // send a single project object
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 /**
  * POST /api/projects
@@ -707,8 +731,297 @@ app.post('/api/requests/:id/reject', verifyToken, async (req, res) => {
   }
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`⚡ Server running on port ${PORT}`);
+// ----------------- NEW: Chat-related REST endpoints -----------------
+
+/**
+ * GET /api/my-projects
+ * Protected. Returns projects where current user is a member (with member lists)
+ */
+app.get('/api/my-projects', verifyToken, async (req, res) => {
+  const userId = req.user.id;
+  try {
+  const projectsRes = await db.query(
+    `SELECT p.* FROM project_members pm
+    JOIN projects p ON pm.project_id = p.id
+    WHERE pm.user_id = $1
+    ORDER BY COALESCE(p.last_message_at, NOW()) DESC`,
+    [userId]
+  );
+
+    const projects = projectsRes.rows || [];
+    const projectIds = projects.map(p => p.id);
+
+    let membersByProject = {};
+    if (projectIds.length > 0) {
+      const membersRes = await db.query(
+        `SELECT pm.project_id, u.id AS user_id, u.username
+         FROM project_members pm
+         JOIN users u ON pm.user_id = u.id
+         WHERE pm.project_id = ANY ($1::int[])
+         ORDER BY pm.joined_at ASC`,
+        [projectIds]
+      );
+      membersRes.rows.forEach(r => {
+        if (!membersByProject[r.project_id]) membersByProject[r.project_id] = [];
+        membersByProject[r.project_id].push({ id: r.user_id, username: r.username });
+      });
+    }
+
+    const out = projects.map(p => ({ ...p, members: membersByProject[p.id] || [] }));
+    res.json({ projects: out });
+  } catch (err) {
+    console.error("Error fetching my-projects:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/projects/:id/members
+ * Protected. Returns members for a project (only for project members).
+ */
+app.get('/api/projects/:id/members', verifyToken, async (req, res) => {
+  const projectId = parseInt(req.params.id, 10);
+  const userId = req.user.id;
+  if (!projectId) return res.status(400).json({ message: 'Invalid project id' });
+
+  try {
+    // Check membership
+    const memCheck = await db.query('SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2', [projectId, userId]);
+    if (memCheck.rowCount === 0) return res.status(403).json({ message: 'Not a member' });
+
+    const membersRes = await db.query(
+      `SELECT u.id, u.username, pm.role, pm.joined_at, pm.last_read_at
+       FROM project_members pm JOIN users u ON pm.user_id = u.id
+       WHERE pm.project_id = $1 ORDER BY pm.joined_at ASC`,
+      [projectId]
+    );
+    res.json({ members: membersRes.rows });
+  } catch (err) {
+    console.error("Error fetching project members:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * GET /api/projects/:id/messages
+ * Protected. Paginated. Query params: limit (default 50), before (ISO date or message id)
+ * Returns messages newest-first.
+ */
+app.get('/api/projects/:id/messages', verifyToken, async (req, res) => {
+  const projectId = parseInt(req.params.id, 10);
+  const userId = req.user.id;
+  if (!projectId) return res.status(400).json({ message: 'Invalid project id' });
+
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  const before = req.query.before || null; // optional cursor (ISO timestamp)
+
+  try {
+    // Verify membership
+    const memCheck = await db.query('SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2', [projectId, userId]);
+    if (memCheck.rowCount === 0) return res.status(403).json({ message: 'Not a member' });
+
+    let messagesRes;
+    if (before) {
+      // before is ISO timestamp
+      messagesRes = await db.query(
+        `SELECT m.id, m.project_id, m.sender_id, u.username AS sender_username, m.content, m.metadata, m.created_at, m.edited_at, m.deleted
+         FROM messages m
+         LEFT JOIN users u ON u.id = m.sender_id
+         WHERE m.project_id = $1 AND m.created_at < $2 AND m.deleted = false
+         ORDER BY m.created_at DESC
+         LIMIT $3`,
+        [projectId, before, limit]
+      );
+    } else {
+      messagesRes = await db.query(
+        `SELECT m.id, m.project_id, m.sender_id, u.username AS sender_username, m.content, m.metadata, m.created_at, m.edited_at, m.deleted
+         FROM messages m
+         LEFT JOIN users u ON u.id = m.sender_id
+         WHERE m.project_id = $1 AND m.deleted = false
+         ORDER BY m.created_at DESC
+         LIMIT $2`,
+        [projectId, limit]
+      );
+    }
+
+    res.json({ messages: messagesRes.rows });
+  } catch (err) {
+    console.error("Error fetching messages:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/**
+ * POST /api/projects/:id/read
+ * Mark last_read_at for the current user in this project.
+ */
+app.post('/api/projects/:id/read', verifyToken, async (req, res) => {
+  const projectId = parseInt(req.params.id, 10);
+  const userId = req.user.id;
+  if (!projectId) return res.status(400).json({ message: 'Invalid project id' });
+
+  try {
+    const update = await db.query(
+      `UPDATE project_members SET last_read_at = now() WHERE project_id = $1 AND user_id = $2 RETURNING last_read_at`,
+      [projectId, userId]
+    );
+    if (update.rowCount === 0) return res.status(403).json({ message: 'Not a member' });
+    return res.json({ last_read_at: update.rows[0].last_read_at });
+  } catch (err) {
+    console.error("Error marking read:", err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// ----------------- SOCKET.IO (real-time chat) -----------------
+
+// Create HTTP server and Socket.IO, attach to same port as express static files
+const server = http.createServer(app);
+
+// configure CORS only if needed; by default same-origin will work
+const io = new Server(server, {
+  // If you run client on a different origin, set cors.origins appropriately:
+  cors: {
+    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : true,
+    methods: ['GET', 'POST']
+  },
+  // pingInterval etc can be set for scaling
+});
+
+// Socket auth middleware
+io.use(async (socket, next) => {
+  try {
+    // client should send { token } inside socket.handshake.auth
+    const token = socket.handshake.auth && socket.handshake.auth.token;
+    if (!token) return next(new Error('Authentication error: token missing'));
+
+    const decoded = jwt.verify(token, SECRET_KEY);
+    socket.user = decoded; // { id, email, username }
+    return next();
+  } catch (err) {
+    console.error('Socket auth error:', err && err.message);
+    return next(new Error('Authentication error'));
+  }
+});
+
+io.on('connection', (socket) => {
+  const user = socket.user;
+  console.log(`Socket connected: user=${user?.id} socket=${socket.id}`);
+
+  // joinProject: user requests to join a project room (server verifies membership)
+  socket.on('joinProject', async ({ projectId }, ack) => {
+    try {
+      projectId = parseInt(projectId, 10);
+      if (!projectId) return ack && ack({ ok: false, message: 'Invalid project id' });
+
+      const memRes = await db.query('SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2', [projectId, user.id]);
+      if (memRes.rowCount === 0) {
+        return ack && ack({ ok: false, message: 'Not a member of project' });
+      }
+
+      const room = `project_${projectId}`;
+      socket.join(room);
+
+      // Optionally update presence / last_seen here
+
+      return ack && ack({ ok: true, message: 'Joined project room' });
+    } catch (err) {
+      console.error('joinProject error:', err);
+      return ack && ack({ ok: false, message: 'Server error' });
+    }
+  });
+
+  // leaveProject: leave room
+  socket.on('leaveProject', ({ projectId }, ack) => {
+    try {
+      const room = `project_${projectId}`;
+      socket.leave(room);
+      return ack && ack({ ok: true });
+    } catch (err) {
+      console.error('leaveProject error:', err);
+      return ack && ack({ ok: false, message: 'Server error' });
+    }
+  });
+
+  // sendMessage: user sends a message to project (server verifies membership, writes to DB, broadcasts)
+  socket.on('sendMessage', async (payload, ack) => {
+    try {
+      const { projectId, content, metadata } = payload || {};
+      if (!projectId || !content || String(content).trim().length === 0) {
+        return ack && ack({ ok: false, message: 'Invalid payload. content required.' });
+      }
+
+      // basic server-side validation
+      const text = String(content).trim();
+      if (text.length > 5000) return ack && ack({ ok: false, message: 'Message too long' });
+
+      // verify membership
+      const memRes = await db.query('SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2', [projectId, user.id]);
+      if (memRes.rowCount === 0) return ack && ack({ ok: false, message: 'Not a member' });
+
+      // Insert message in transaction, update project's last_message_at
+      const client = await db.pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const insertRes = await client.query(
+          `INSERT INTO messages (project_id, sender_id, content, metadata)
+           VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+          [projectId, user.id, text, metadata || {}]
+        );
+        const msgRow = insertRes.rows[0];
+
+        // Update project preview fields (optional)
+        await client.query(
+          `UPDATE projects SET last_message_at = $1, last_message_id = $2 WHERE id = $3`,
+          [msgRow.created_at, msgRow.id, projectId]
+        );
+
+        await client.query('COMMIT');
+
+        // Build broadcast payload (include sender username)
+        const messagePayload = {
+          id: msgRow.id,
+          project_id: projectId,
+          sender_id: user.id,
+          sender_username: user.username,
+          content: text,
+          metadata: metadata || {},
+          created_at: msgRow.created_at
+        };
+
+        const room = `project_${projectId}`;
+        io.to(room).emit('newMessage', messagePayload);
+
+        // ack to sender
+        return ack && ack({ ok: true, message: messagePayload });
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Error inserting message transaction:', err);
+        return ack && ack({ ok: false, message: 'DB error' });
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error('sendMessage error:', err);
+      return ack && ack({ ok: false, message: 'Server error' });
+    }
+  });
+
+  // Optional: typing indicator
+  socket.on('typing', ({ projectId, isTyping }) => {
+    if (!projectId) return;
+    const room = `project_${projectId}`;
+    socket.to(room).emit('typing', { userId: user.id, username: user.username, isTyping: !!isTyping });
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log(`Socket disconnected: ${socket.id} reason=${reason}`);
+    // Optionally broadcast presence change
+  });
+});
+
+// Start server using http server (Socket.IO attached)
+server.listen(PORT, () => {
+  console.log(`⚡ Server + Socket.IO running on port ${PORT}`);
 });

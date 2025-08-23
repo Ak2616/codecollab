@@ -133,7 +133,7 @@
   }
 
   // Render helpers for project lists (members included)
-  function renderProjectCardWithMembers(p) {
+    function renderProjectCardWithMembers(p) {
     const card = document.createElement('div');
     card.className = 'card';
     const ownerHtml = p.owner ? `${escapeHtml(p.owner.username)}` : escapeHtml(p.created_by || 'Unknown');
@@ -145,7 +145,12 @@
           <div class="muted">${escapeHtml(p.tech_stack || '')}</div>
           <div class="project-members">Members: ${membersHtml || '<span class="muted">No members</span>'}</div>
         </div>
-        <div class="muted">Deadline: ${p.deadline ? new Date(p.deadline).toLocaleDateString() : 'N/A'}</div>
+        <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+          <div class="muted">Deadline: ${p.deadline ? new Date(p.deadline).toLocaleDateString() : 'N/A'}</div>
+          <div>
+            <button class="btn" onclick="window.location.href='project-chat.html?projectId=${p.id}'">Open Chat</button>
+          </div>
+        </div>
       </div>
     `;
     return card;
@@ -352,6 +357,7 @@
           return;
         }
 
+        // Fetch profile (stats + incoming/outgoing)
         const res = await fetch('/api/profile', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -361,6 +367,7 @@
         }
         const json = await res.json();
 
+        // Basic profile info
         const userData = json.user || json;
         document.getElementById('usernameDisplay').textContent = userData.username || '—';
         document.getElementById('emailDisplay').textContent = userData.email || '—';
@@ -383,12 +390,15 @@
         document.getElementById('sentCount').textContent = json.stats?.requests_sent ?? 0;
         document.getElementById('ongoingCount').textContent = json.stats?.ongoing ?? 0;
 
+        // Clear lists / boxes
         const incomingList = document.getElementById('incomingList');
         const outgoingList = document.getElementById('outgoingList');
-        const acceptedList = document.getElementById('ownedProjects'); // reuse to show accepted joins (owner's view)
+        const ownedBox = document.getElementById('ownedProjects');
+        const joinedBox = document.getElementById('joinedProjects');
         incomingList.innerHTML = '';
         outgoingList.innerHTML = '';
-        acceptedList.innerHTML = '';
+        ownedBox.innerHTML = '';
+        joinedBox.innerHTML = '';
 
         // Incoming: show pending only in the incoming area
         (json.incoming || []).forEach(req => {
@@ -401,25 +411,55 @@
           if (card) outgoingList.appendChild(card);
         });
 
-        // Accepted incoming -> show in ownedProjects area
+        // Accepted incoming -> show small cards in ownedProjects for owner view (keeps current behavior)
         (json.incoming || []).filter(r => r.request_status === 'accepted')
           .forEach(req => {
             const card = document.createElement('div');
             card.className = 'card';
             card.innerHTML = `<div><strong><a class="user-link" href="profile.html?user_id=${req.requester_id}">${escapeHtml(req.requester_username)}</a></strong> joined <em>${escapeHtml(req.project_title)}</em></div>
                               <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
-            acceptedList.appendChild(card);
+            ownedBox.appendChild(card);
           });
 
-        // Also show outgoing accepted (joined others) in joinedProjects
+        // Outgoing accepted (joined others) shown in joinedProjects as now
         (json.outgoing || []).filter(r => r.request_status === 'accepted')
           .forEach(req => {
             const card = document.createElement('div');
             card.className = 'card';
             card.innerHTML = `<div>You joined <em>${escapeHtml(req.project_title)}</em> (owner: <strong><a class="user-link" href="profile.html?user_id=${req.owner_id}">${escapeHtml(req.owner_username)}</a></strong>)</div>
                               <div class="muted">on ${new Date(req.requested_at).toLocaleString()}</div>`;
-            document.getElementById('joinedProjects').appendChild(card);
+            joinedBox.appendChild(card);
           });
+
+        // --- NEW: Fetch owned projects and joined projects so we can render full cards (with "Open Chat") ---
+        try {
+          // Owned projects (public endpoint)
+          const ownedRes = await fetch(`/api/users/${meId}/projects/owned`);
+          if (ownedRes.ok) {
+            const ownedJson = await ownedRes.json();
+            (ownedJson.projects || []).forEach(p => {
+              ownedBox.appendChild(renderProjectCardWithMembers(p));
+            });
+          }
+
+          // Joined projects (use protected /api/my-projects which returns projects user is a member of)
+          const joinedRes = await fetch('/api/my-projects', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (joinedRes.ok) {
+            const joinedJson = await joinedRes.json();
+            (joinedJson.projects || []).forEach(p => {
+              // Avoid duplicating any project that is already shown in ownedBox by title check
+              const alreadyShown = Array.from(ownedBox.querySelectorAll('.card')).some(card => {
+                return card.innerText.includes(p.title);
+              });
+              if (!alreadyShown) joinedBox.appendChild(renderProjectCardWithMembers(p));
+            });
+          }
+        } catch (err) {
+          console.error("Error fetching owned/joined projects:", err);
+          // still fine: user will at least see incoming/outgoing request info
+        }
 
         // Show edit controls for owner
         document.getElementById('editControls').style.display = 'block';

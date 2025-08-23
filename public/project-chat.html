@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Project Chat - CodeCollab</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin:0; background:#f3f4f6; }
+    .topbar { background:#ffffff; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+    .container { max-width:1000px; margin:16px auto; background:#fff; border-radius:8px; overflow:hidden; display:flex; height:75vh; }
+    .sidebar { width:260px; border-right:1px solid #e5e7eb; padding:12px; }
+    .chat { flex:1; display:flex; flex-direction:column; }
+    .messages { flex:1; padding:12px; overflow:auto; background:linear-gradient(#fff,#fafafa); }
+    .message { margin-bottom:12px; }
+    .message .meta { font-size:12px; color:#6b7280; margin-bottom:4px; }
+    .message .text { padding:8px 10px; background:#f1f5f9; display:inline-block; border-radius:8px; }
+    .inputRow { padding:12px; border-top:1px solid #e5e7eb; display:flex; gap:8px; }
+    .inputRow textarea { flex:1; resize:none; padding:8px; border-radius:6px; border:1px solid #e5e7eb; min-height:48px; }
+    .btn-send { background:#0b5fff; color:#fff; border:none; padding:10px 14px; border-radius:6px; font-weight:600; cursor:pointer; }
+    .muted { color:#6b7280; font-size:0.9rem; }
+    .member { padding:6px 8px; border-radius:6px; margin-bottom:6px; background:#f8fafc; display:flex; justify-content:space-between; align-items:center; }
+    .unread-badge { background:#ef4444; color:white; padding:2px 6px; border-radius:999px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div id="projectTitle" style="font-weight:700;" class="muted">Loading...</div>
+  </div>
+
+  <div class="container" id="mainContainer" style="height:72vh;">
+    <div class="sidebar">
+      <h4>Members</h4>
+      <div id="membersList" style="margin-top:8px;"></div>
+      <div style="margin-top:12px;">
+        <button onclick="window.history.back()" class="btn">Back</button>
+      </div>
+    </div>
+
+    <div class="chat">
+      <div class="messages" id="messages"></div>
+      <div class="inputRow">
+        <textarea id="messageInput" placeholder="Write a message..." maxlength="5000"></textarea>
+        <button id="sendBtn" class="btn-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    (async function () {
+      const token = localStorage.getItem('authToken');
+      if (!token) return window.location.href = '/login.html';
+
+      const url = new URL(window.location.href);
+      const projectId = parseInt(url.searchParams.get('projectId'), 10);
+      if (!projectId) return alert('Missing projectId');
+
+      const messagesEl = document.getElementById('messages');
+      const membersEl = document.getElementById('membersList');
+      const projectTitleEl = document.getElementById('projectTitle');
+
+      // Helper to escape
+      function escapeHtml(s = '') {
+        return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);
+      }
+
+      // fetch project members
+      async function loadMembers() {
+        const res = await fetch(`/api/projects/${projectId}/members`, { headers: { 'Authorization': `Bearer ${token}` }});
+        if (!res.ok) {
+          if (res.status === 403) { alert('You are not a member of this project'); window.location.href = '/profile.html'; return; }
+          throw new Error('Failed fetching members');
+        }
+        const json = await res.json();
+        membersEl.innerHTML = '';
+        json.members.forEach(m => {
+          const div = document.createElement('div');
+          div.className = 'member';
+          div.innerHTML = `<span>${escapeHtml(m.username)}</span><span class="muted">${escapeHtml(m.role || '')}</span>`;
+          membersEl.appendChild(div);
+        });
+      }
+
+      // fetch initial messages
+      let earliestCursor = null; // used if we want to implement lazy load
+      async function loadMessages() {
+        const res = await fetch(`/api/projects/${projectId}/messages?limit=100`, { headers: { 'Authorization': `Bearer ${token}` }});
+        if (!res.ok) throw new Error('Failed fetching messages');
+        const json = await res.json();
+        // messages are newest-first; reverse to show oldest -> newest
+        const messages = (json.messages || []).slice().reverse();
+        messagesEl.innerHTML = '';
+        messages.forEach(renderMessage);
+        // scroll to bottom
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      function renderMessage(m) {
+        const div = document.createElement('div');
+        div.className = 'message';
+        const metaText = `${escapeHtml(m.sender_username || 'Unknown')} • ${new Date(m.created_at).toLocaleString()}`;
+        div.innerHTML = `<div class="meta">${metaText}</div><div class="text">${escapeHtml(m.content)}</div>`;
+        messagesEl.appendChild(div);
+      }
+
+      // Connect socket.io with token
+      const socket = io({ auth: { token } , transports: ['websocket', 'polling'] });
+
+      socket.on('connect_error', (err) => {
+        console.error('Socket connect error', err);
+      });
+
+      socket.on('connect', async () => {
+        console.log('socket connected', socket.id);
+        // Join project room
+        socket.emit('joinProject', { projectId }, async (ack) => {
+          if (!ack || !ack.ok) {
+            alert(ack?.message || 'Failed to join project chat');
+            return window.location.href = '/profile.html';
+          }
+          // Load up members & existing messages after successful join
+          try {
+            await loadMembers();
+            await loadMessages();
+            // mark as read on server
+            await fetch(`/api/projects/${projectId}/read`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }});
+          } catch (e) {
+            console.error(e);
+          }
+        });
+      });
+
+      socket.on('newMessage', (msg) => {
+        // if the message belongs to this project, render and scroll
+        if (parseInt(msg.project_id, 10) === projectId) {
+          renderMessage(msg);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+      });
+
+      socket.on('typing', (info) => {
+        // optional: show typing indicator
+        // e.g. console.log(info);
+      });
+
+      // Send button
+      const input = document.getElementById('messageInput');
+      const sendBtn = document.getElementById('sendBtn');
+      sendBtn.onclick = async () => {
+        const content = input.value.trim();
+        if (!content) return;
+        sendBtn.disabled = true;
+        try {
+          socket.emit('sendMessage', { projectId, content }, (ack) => {
+            sendBtn.disabled = false;
+            if (!ack || !ack.ok) {
+              alert(ack?.message || 'Failed to send message');
+              return;
+            }
+            // ack contains messagePayload with created_at and id. It will also be broadcast by server.
+            input.value = '';
+          });
+        } catch (err) {
+          console.error(err);
+          sendBtn.disabled = false;
+          alert('Failed to send');
+        }
+      };
+
+      // Fetch project title from a simple API: use /api/my-projects or /api/users/:id/projects/joined
+    async function loadProjectInfo() {
+    try {
+        const res = await fetch(`/api/projects/${projectId}`, { 
+        headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) {
+        projectTitleEl.textContent = 'Unknown Project';
+        return;
+        }
+        const project = await res.json();
+        projectTitleEl.textContent = `${project.title} • Chat`;
+    } catch (err) {
+        console.error('Could not load project title', err);
+        projectTitleEl.textContent = 'Project Chat';
+    }
+    }
+
+
+      await loadProjectInfo();
+    })();
+  </script>
+</body>
+</html>
